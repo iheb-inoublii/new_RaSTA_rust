@@ -50,6 +50,7 @@ pub struct RastaConnection<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clo
     pub n_send_max: u16,
     remote_n_send_max: u16,
     last_received_timestamp: u32,
+    remote_clock_offset: Option<u32>,
     rx_buffer: [u8; 512],
     tx_buffer: [u8; 512],
     app_rx_buffer: [[u8; 256]; 8],
@@ -81,6 +82,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             n_send_max: config.n_send_max,
             remote_n_send_max: config.n_send_max,
             last_received_timestamp: 0,
+            remote_clock_offset: None,
             rx_buffer: [0; 512],
             tx_buffer: [0; 512],
             app_rx_buffer: [[0; 256]; 8],
@@ -186,9 +188,17 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             }
         }
 
+        let local_now = self.clock.now_ms();
+        let remote_ts_local = if let Some(offset) = self.remote_clock_offset {
+            packet.timestamp.wrapping_add(offset)
+        } else {
+            self.remote_clock_offset = Some(local_now.wrapping_sub(packet.timestamp));
+            local_now
+        };
+
         let time_supervisor = TimeSupervisor::new(self.t_max);
         if time_supervisor
-            .validate(self.clock.now_ms(), packet.timestamp)
+            .validate(local_now, remote_ts_local)
             .is_err()
         {
             return self.disconnect_with_error();
