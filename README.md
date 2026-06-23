@@ -1,17 +1,7 @@
-# DIN RaSTA 03.03 interoperability-test implementation — non-production
-
-> **Safety disclaimer**
->
-> This repository is an academic, non-production RaSTA implementation. It is
-> not certified, independently assessed, or approved for operational railway
-> use. It must not be used in a safety-critical deployment without a complete
-> standards-conformant development lifecycle, project-specific configuration,
-> verification, validation, safety case, and independent assessment.
 
 ## Project status
 
-This is an academic/development Rust implementation of selected RaSTA 03.03
-protocol behaviour. It provides a fixed-capacity, `no_std`-capable core and a
+This is an academic/development Rust implementation. It provides a fixed-capacity, `no_std`-capable core and a
 two-UDP-channel desktop demonstration. It is useful for learning, development,
 and controlled interoperability experiments.
 
@@ -180,8 +170,3 @@ docs/din-rasta-03-03-traceability.md  implementation-status traceability
 src/                               library and desktop demonstration
 ```
 
-## Licence
-
-No open-source licence has currently been assigned. All rights remain with the
-contributors unless a licence is added later. Consider keeping the repository
-private until the project team or professor has selected an appropriate licence.
