@@ -103,6 +103,9 @@ fn main() {
     loop {
         if let Err(e) = api.poll() {
             println!("Error during poll: {:?}", e);
+            while let Some(diagnostic) = api.take_diagnostic() {
+                eprintln!("RaSTA diagnostic: {:?}", diagnostic);
+            }
             break;
         }
 

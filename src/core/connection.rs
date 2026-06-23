@@ -199,6 +199,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
         if self.state_machine.current_state != RastaState::Closed {
             self.send_disconnect(DisconnectReason::UserRequest)?;
             self.transition(RastaState::Closed)?;
+            self.stop_timeliness_monitor();
         }
         Ok(())
     }
@@ -211,6 +212,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
         let send_result = self.send_disconnect(reason);
         if self.state_machine.current_state != RastaState::Closed {
             self.transition(RastaState::Closed)?;
+            self.stop_timeliness_monitor();
         }
         send_result
     }
@@ -392,6 +394,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
                     }
                     PacketType::DisconnectionRequest => {
                         self.transition(RastaState::Closed)?;
+                        self.stop_timeliness_monitor();
                     }
                     PacketType::Data | PacketType::RetransmissionData => {
                         self.enqueue_application_data(&packet)?;
@@ -579,6 +582,11 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
     fn start_timeliness_monitor(&mut self, now_ms: u32) {
         self.confirmed_timestamp_reference = Some(now_ms);
         self.timeliness_deadline_ms = Some(now_ms.wrapping_add(self.t_max));
+    }
+
+    fn stop_timeliness_monitor(&mut self) {
+        self.confirmed_timestamp_reference = None;
+        self.timeliness_deadline_ms = None;
     }
 
     fn apply_timeliness(&mut self, packet: &Packet, now_ms: u32) -> Result<(), ConnectionError> {
