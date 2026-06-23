@@ -326,6 +326,10 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             }
         }
 
+        // DIN 5.5.6.1: copy the timestamp of every formally correct received
+        // message into the next outbound PDU; only time-out related PDUs are
+        // analysed by the adaptive monitor.
+        self.last_received_timestamp = packet.timestamp;
         self.apply_timeliness(&packet, local_now)?;
         self.heartbeat.reset();
         self.apply_confirmation(packet.confirmed_sequence_number)?;
@@ -607,7 +611,6 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             self.confirmed_timestamp_reference = Some(packet.confirmed_timestamp);
             self.timeliness_deadline_ms = Some(now_ms.wrapping_add(self.t_max - round_trip_ms));
         }
-        self.last_received_timestamp = packet.timestamp;
         Ok(())
     }
 

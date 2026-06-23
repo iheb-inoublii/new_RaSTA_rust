@@ -475,6 +475,18 @@ mod cases {
         let mut output = [0u8; 32];
         let length = server.receive_data(&mut output).unwrap();
         assert_eq!(&output[..length], b"rail-safe");
+
+        // Exercise several heartbeat periods beyond T_max. A stale confirmed
+        // timestamp would make either peer enter SafetyTimeout here.
+        for now in [300u32, 600, 900, 1_200, 1_500, 1_800, 2_100] {
+            time.set(now);
+            client.process().unwrap();
+            server.process().unwrap();
+            client.process().unwrap();
+            server.process().unwrap();
+            assert_eq!(client.state_machine.current_state, RastaState::Up);
+            assert_eq!(server.state_machine.current_state, RastaState::Up);
+        }
     }
 
     #[test]
