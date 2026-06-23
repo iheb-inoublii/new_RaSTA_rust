@@ -27,7 +27,20 @@ impl Transport for UdpSocketTransport {
     fn receive(&mut self, buffer: &mut [u8]) -> Result<usize, TransportError> {
         match self.socket.recv(buffer) {
             Ok(n) => Ok(n),
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(0),
+            // A connected UDP socket can surface an ICMP "port unreachable" as
+            // ConnectionRefused (or ConnectionReset on Windows).  It identifies
+            // one lost datagram, not a permanent transport failure; RaSTA's
+            // redundancy and timeout supervision decide how to react.
+            Err(ref e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock
+                        | io::ErrorKind::ConnectionRefused
+                        | io::ErrorKind::ConnectionReset
+                ) =>
+            {
+                Ok(0)
+            }
             Err(_) => Err(TransportError::ReceiveFailed),
         }
     }
