@@ -112,6 +112,17 @@ fn main() {
             last_state = current_state;
         }
 
+        if mode == "B" && api.has_received_data() {
+            let mut data = [0u8; 256];
+            match api.receive_data(&mut data) {
+                Ok(length) => match std::str::from_utf8(&data[..length]) {
+                    Ok(text) => println!("Received data: {text:?}"),
+                    Err(_) => println!("Received {length} non-UTF-8 data bytes"),
+                },
+                Err(error) => eprintln!("Failed to receive data: {:?}", error),
+            }
+        }
+
         if current_state == ConnectionStatus::Up && mode == "A" && !data_sent {
             println!("Sending data: 'Hello from A'");
             if let Err(error) = api.send_data(b"Hello from A") {
@@ -126,11 +137,6 @@ fn main() {
             if let Err(error) = api.close_connection() {
                 eprintln!("Failed to disconnect: {:?}", error);
             }
-            break;
-        }
-
-        if mode == "B" && start_time.elapsed() > Duration::from_secs(10) {
-            println!("Node B timeout, exiting.");
             break;
         }
 
