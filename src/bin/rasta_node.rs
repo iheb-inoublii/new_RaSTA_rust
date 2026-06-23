@@ -4,7 +4,7 @@ use rasta_stack::adapters::standard_timer::StdTimer;
 use rasta_stack::application::service_interface::{ConnectionStatus, RastaService};
 use rasta_stack::config::DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE;
 use rasta_stack::core::connection::RastaConfig;
-use rasta_stack::core::redundancy::RedundancyConfig;
+use rasta_stack::core::redundancy::{RedundancyCheckCode, RedundancyConfig};
 use rasta_stack::core::safety_code::SafetyCodeConfig;
 use std::env;
 use std::thread;
@@ -63,18 +63,26 @@ fn main() {
         }
     };
 
+    // Test-only interoperability profile. Not approved for production or
+    // railway operational use.
+    let profile = DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE;
+    if let Err(error) = profile.validate() {
+        eprintln!("Invalid interoperability-test profile: {:?}", error);
+        return;
+    }
     let config = RastaConfig {
         sender_id,
         remote_id,
-        safety_code: SafetyCodeConfig::md4_low8(
-            DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE.md4_initial_value,
-        ),
-        redundancy: RedundancyConfig::default(),
-        t_max: 2000,
+        safety_code: SafetyCodeConfig::md4_low8(profile.md4_initial_value),
+        redundancy: RedundancyConfig {
+            check_code: RedundancyCheckCode::OptionB,
+            t_seq_ms: profile.t_seq_ms,
+        },
+        t_max: profile.t_max_ms,
         initial_seq: 0,
-        heartbeat_interval_ms: 300,
-        n_send_max: 20,
-        mwa: 10,
+        heartbeat_interval_ms: profile.t_h_ms,
+        n_send_max: profile.n_send_max as u16,
+        mwa: profile.mwa as u16,
     };
 
     let mut api =

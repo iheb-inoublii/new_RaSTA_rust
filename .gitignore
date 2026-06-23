@@ -1,3 +1,38 @@
+# Rust build output
 /target/
-/rasta_stack/target/
+**/target/
+
+# IDE files
 .idea/
+.vscode/
+*.iml
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+credentials.*
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# Packet captures
+*.pcap
+*.pcapng
+
+# Coverage and generated reports
+coverage/
+tarpaulin-report.html
+lcov.info

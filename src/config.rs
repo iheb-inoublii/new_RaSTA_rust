@@ -89,10 +89,13 @@ impl InteroperabilityProfile {
 
 pub const DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE: InteroperabilityProfile =
     InteroperabilityProfile {
+        // Test-only interoperability profile. Not approved for production or
+        // railway operational use.
         protocol_version: InteroperabilityProfile::VERSION_03_03,
         safety_code_length: SafetyCodeLength::Md4Lower8,
         redundancy_crc: RedundancyCrc::OptionB,
         channel_count: 2,
+        // Test-only RaSTA network identifier; not an operational allocation.
         network_identifier: 0x0000_0001,
         // A=0x67452302, B=0xEFCDAB98, C=0x98BADCFF, D=0x10325477, little-endian words.
         md4_initial_value: [
