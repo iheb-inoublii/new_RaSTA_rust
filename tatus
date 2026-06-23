@@ -1,0 +1,335 @@
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/din-rasta-03-03-traceability.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/bin/rasta_node.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/config.rs', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/.gitignore b/.gitignore[m
+[1mindex 54920a2..46830c9 100644[m
+[1m--- a/.gitignore[m
+[1m+++ b/.gitignore[m
+[36m@@ -1,3 +1,38 @@[m
+[32m+[m[32m# Rust build output[m
+ /target/[m
+[31m-/rasta_stack/target/[m
+[32m+[m[32m**/target/[m
+[32m+[m
+[32m+[m[32m# IDE files[m
+ .idea/[m
+[32m+[m[32m.vscode/[m
+[32m+[m[32m*.iml[m
+[32m+[m
+[32m+[m[32m# Environment and secrets[m
+[32m+[m[32m.env[m
+[32m+[m[32m.env.*[m
+[32m+[m[32m!.env.example[m
+[32m+[m[32m*.pem[m
+[32m+[m[32m*.key[m
+[32m+[m[32m*.p12[m
+[32m+[m[32m*.pfx[m
+[32m+[m[32msecrets.*[m
+[32m+[m[32mcredentials.*[m
+[32m+[m
+[32m+[m[32m# Operating-system files[m
+[32m+[m[32m.DS_Store[m
+[32m+[m[32mThumbs.db[m
+[32m+[m
+[32m+[m[32m# Logs and temporary files[m
+[32m+[m[32m*.log[m
+[32m+[m[32m*.tmp[m
+[32m+[m[32m*.swp[m
+[32m+[m[32m*~[m
+[32m+[m
+[32m+[m[32m# Packet captures[m
+[32m+[m[32m*.pcap[m
+[32m+[m[32m*.pcapng[m
+[32m+[m
+[32m+[m[32m# Coverage and generated reports[m
+[32m+[m[32mcoverage/[m
+[32m+[m[32mtarpaulin-report.html[m
+[32m+[m[32mlcov.info[m
+[1mdiff --git a/README.md b/README.md[m
+[1mindex 9ee57b0..e95dcba 100644[m
+[1m--- a/README.md[m
+[1m+++ b/README.md[m
+[36m@@ -1,91 +1,187 @@[m
+[31m-# RaSTA Protocol Stack (Reference/Educational Implementation)[m
+[32m+[m[32m# DIN RaSTA 03.03 interoperability-test implementation — non-production[m
+ [m
+[31m-This project is a safety-oriented, `no_std`-capable implementation of the RaSTA[m
+[31m-(Rail Safe Transport Application) protocol structure. It separates the[m
+[31m-platform-independent protocol layers from platform-dependent transport, clock,[m
+[31m-timer, logging, synchronization, and system adapters.[m
+[32m+[m[32m> **Safety disclaimer**[m
+[32m+[m[32m>[m
+[32m+[m[32m> This repository is an academic, non-production RaSTA implementation. It is[m
+[32m+[m[32m> not certified, independently assessed, or approved for operational railway[m
+[32m+[m[32m> use. It must not be used in a safety-critical deployment without a complete[m
+[32m+[m[32m> standards-conformant development lifecycle, project-specific configuration,[m
+[32m+[m[32m> verification, validation, safety case, and independent assessment.[m
+ [m
+[31m-This code is suitable for learning, prototyping, and architecture work. It is[m
+[31m-not a certified RaSTA product and still requires conformance vectors, safety[m
+[31m-analysis, target-specific validation, and an approved safety process before any[m
+[31m-safety-critical use.[m
+[32m+[m[32m## Project status[m
+ [m
+[31m-## Key Requirements and Implementation[m
+[32m+[m[32mThis is an academic/development Rust implementation of selected RaSTA 03.03[m
+[32m+[m[32mprotocol behaviour. It provides a fixed-capacity, `no_std`-capable core and a[m
+[32m+[m[32mtwo-UDP-channel desktop demonstration. It is useful for learning, development,[m
+[32m+[m[32mand controlled interoperability experiments.[m
+ [m
+[31m-| Requirement | Status | Implementation Detail |[m
+[31m-|-------------|--------|-----------------------|[m
+[31m-| Safe Rust | Done | No `unsafe` blocks, raw pointers, or manual memory management. |[m
+[31m-| No Dynamic Allocation | Done | The core and platform traits are `#![no_std]` capable. Buffers are fixed-size arrays. |[m
+[31m-| Portable Architecture | Done | Core logic depends on `Clock`, `Timer`, and `Transport` traits only. |[m
+[31m-| Safety and Retransmission Layer | Partial | PDU parsing, little-endian fields, sequence checks, heartbeat, retransmission request/response, timestamp supervision, and configurable safety code. |[m
+[31m-| Redundancy Layer | Partial | Redundancy frame, duplicate send, duplicate discard, optional CRC check code. |[m
+[31m-| Application API | Partial | `open_connection`, `send_data`, `receive_data`, `close_connection`, `status`, and `poll`. |[m
+[31m-| Unit Testing | Partial | Tests cover packets, safety-code MD4 vectors, timestamp supervision, sequence checks, state transitions, retransmission buffer, application receive queue, and redundant duplicate discard. |[m
+[32m+[m[32mIt is **not** production-ready, certified, certification-ready, fully[m
+[32m+[m[32mDIN-compliant, or proven interoperable with another RaSTA implementation.[m
+[32m+[m[32mSeveral requirements remain incomplete; see [Known limitations](#known-limitations)[m
+[32m+[m[32mand the [traceability notes](docs/din-rasta-03-03-traceability.md).[m
+ [m
+[31m-## Layer Split[m
+[32m+[m[32mProduction parameters must come from an approved project profile, an[m
+[32m+[m[32minterface-control specification, and a safety case. The code and its current[m
+[32m+[m[32mconfiguration have not been independently assessed or certified.[m
+[32m+[m
+[32m+[m[32m## Safety disclaimer[m
+[32m+[m
+[32m+[m[32mThe executable configuration is a test-only interoperability profile. Do not[m
+[32m+[m[32mreuse its identifiers, timing values, MD4 initial value, or ports as operational[m
+[32m+[m[32mrailway parameters. A deployment needs project-specific parameter management,[m
+[32m+[m[32mconfiguration control, verification, validation, and independent assessment.[m
+[32m+[m
+[32m+[m[32m## Architecture[m
+[32m+[m
+[32m+[m[32m```text[m
+[32m+[m[32mRailway signalling application[m
+[32m+[m[32m        │[m
+[32m+[m[32mRaSTA service API                 src/application/service_interface.rs[m
+[32m+[m[32m        │[m
+[32m+[m[32mSRL and redundancy logic          src/core/[m
+[32m+[m[32m        │[m
+[32m+[m[32mPlatform traits                   src/platform/[m
+[32m+[m[32m        │[m
+[32m+[m[32mDesktop / embedded adapters       src/adapters/[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mThe core uses fixed-size arrays and generic platform traits. The `std`-only[m
+[32m+[m[32mUDP demo is deliberately outside the `no_std` core.[m
+[32m+[m
+[32m+[m[32m## Build[m
+[32m+[m
+[32m+[m[32mThe desktop demonstration requires Rust with the `std` feature:[m
+[32m+[m
+[32m+[m[32m```bash[m
+[32m+[m[32mcargo build --release --features std --bin rasta_node[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mThe binary interface is:[m
+ [m
+ ```text[m
+[31m-Railway Signalling Application / SCI[m
+[31m-    |[m
+[31m-Application API / RaSTA Service    src/application/service_interface.rs[m
+[31m-    |[m
+[31m-Platform-Independent RaSTA Core    src/core/*[m
+[31m-    |                               SRL + RL protocol logic[m
+[31m-    |[m
+[31m-Abstract Platform Interfaces       src/platform/*[m
+[31m-    |[m
+[31m-Platform-Specific Adapters         src/adapters/*[m
+[31m-    |[m
+[31m-Target Platform / System Services  OS, network, timers, clocks, hardware[m
+[32m+[m[32mrasta_node <A|B> <remote_ip>[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32m`A` uses local UDP ports 5000 and 6000 and sends to the peer's 5001 and 6001.[m
+[32m+[m[32m`B` uses local UDP ports 5001 and 6001 and sends to the peer's 5000 and 6000.[m
+[32m+[m
+[32m+[m[32m## Test[m
+[32m+[m
+[32m+[m[32mThe following commands were run successfully against this repository:[m
+[32m+[m
+[32m+[m[32m```bash[m
+[32m+[m[32mcargo fmt --all -- --check[m
+[32m+[m[32mcargo check --all-targets --all-features[m
+[32m+[m[32mcargo test --all-targets --all-features[m
+[32m+[m[32mcargo clippy --all-targets --all-features -- -D warnings[m
+[32m+[m[32mcargo check --no-default-features --lib[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mThe current suite contains unit and in-memory two-channel tests. It is not a[m
+[32m+[m[32msubstitute for conformance, robustness, hardware-in-the-loop, or independent[m
+[32m+[m[32minteroperability testing.[m
+[32m+[m
+[32m+[m[32m## Run two local nodes[m
+[32m+[m
+[32m+[m[32mUse two terminals. Start B first:[m
+[32m+[m
+[32m+[m[32m```bash[m
+[32m+[m[32mcargo run --release --features std --bin rasta_node -- B 127.0.0.1[m
+ ```[m
+ [m
+[31m-The protocol core does not import UDP, TCP, sockets, OS time, threads, or heap[m
+[31m-allocation. Those details are supplied through traits.[m
+[31m-[m
+[31m-## Project Structure[m
+[31m-[m
+[31m-- `src/application/service_interface.rs`: RaSTA service API used by the railway signalling application.[m
+[31m-- `src/core/`: platform-independent SRL/RL protocol logic.[m
+[31m-  - `connection_state_machine.rs`[m
+[31m-  - `pdu.rs`[m
+[31m-  - `sequencing.rs`[m
+[31m-  - `retransmission.rs`[m
+[31m-  - `safety_code.rs`[m
+[31m-  - `heartbeat.rs`[m
+[31m-  - `redundancy_management.rs`[m
+[31m-  - `time_supervision.rs`[m
+[31m-- `src/platform/`: abstract platform interfaces only.[m
+[31m-  - `transport.rs`[m
+[31m-  - `timer.rs`[m
+[31m-  - `clock.rs`[m
+[31m-  - `logger.rs`[m
+[31m-  - `synchronization.rs`[m
+[31m-- `src/adapters/`: platform-dependent implementations.[m
+[31m-  - `socket_transport.rs`[m
+[31m-  - `standard_timer.rs`[m
+[31m-  - `standard_clock.rs`[m
+[31m-  - `embedded_ethernet.rs`[m
+[31m-  - `linux.rs`[m
+[31m-  - `windows.rs`[m
+[31m-  - `test.rs`[m
+[31m-- `src/tests.rs`: automated unit tests.[m
+[31m-[m
+[31m-## Build and Test[m
+[32m+[m[32mThen start A:[m
+ [m
+ ```bash[m
+[31m-cargo check[m
+[31m-cargo check --features std[m
+[31m-cargo test[m
+[31m-cargo run --features std --bin rasta_node -- A 127.0.0.1[m
+[32m+[m[32mcargo run --release --features std --bin rasta_node -- A 127.0.0.1[m
+ ```[m
+ [m
+[31m-## Safety-Code Note[m
+[32m+[m[32mThe demo prints the channel endpoints, reaches `Up`, sends `Hello from A`, and[m
+[32m+[m[32mthen A disconnects after a short demonstration interval.[m
+ [m
+[31m-Safety and Retransmission Layer packets support the RaSTA safety-code modes:[m
+[32m+[m[32m## Run Windows and Linux nodes[m
+[32m+[m
+[32m+[m[32mBuild the same revision on both hosts. Identify the IP address that each host[m
+[32m+[m[32mactually uses on the VMware network; on multihomed hosts it may differ from a[m
+[32m+[m[32mWi-Fi or host-only adapter address.[m
+[32m+[m
+[32m+[m[32mStart B on Kali/Linux first, replacing the placeholders with the peer's actual[m
+[32m+[m[32msource address:[m
+[32m+[m
+[32m+[m[32m```bash[m
+[32m+[m[32mcargo run --release --features std --bin rasta_node -- B <windows-source-ip>[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mStart A on Windows:[m
+[32m+[m
+[32m+[m[32m```powershell[m
+[32m+[m[32mcargo run --release --features std --bin rasta_node -- A <kali-source-ip>[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mAllow inbound UDP 5000 and 6000 on Windows, and inbound UDP 5001 and 6001 on[m
+[32m+[m[32mLinux/Kali. Do not run `nc` on either RaSTA port while the demo is running.[m
+[32m+[m
+[32m+[m[32mThe UDP adapter connects each socket to the configured peer endpoint and will[m
+[32m+[m[32mdiscard datagrams from a different source address or port. To verify the actual[m
+[32m+[m[32msource address on Kali:[m
+[32m+[m
+[32m+[m[32m```bash[m
+[32m+[m[32msudo tcpdump -n -i any 'udp and (port 5000 or port 5001 or port 6000 or port 6001)'[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mYou can also inspect listeners with `ss -lunp` on Linux or `netstat -ano -p udp`[m
+[32m+[m[32mon Windows. Ping proves only IP routing; it does not prove both required UDP[m
+[32m+[m[32mchannels or endpoint/source-address matching.[m
+[32m+[m
+[32m+[m[32m## Configuration[m
+[32m+[m
+[32m+[m[32m[`src/config.rs`](src/config.rs) defines the clearly labelled[m
+[32m+[m[32m`DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE`. It is not a production profile.[m
+[32m+[m[32mThe current test configuration uses:[m
+[32m+[m
+[32m+[m[32m| Parameter | Test-only value |[m
+[32m+[m[32m|---|---:|[m
+[32m+[m[32m| Protocol version | ASCII `0303` |[m
+[32m+[m[32m| RaSTA network identifier | `1` |[m
+[32m+[m[32m| MD4 initial value | Non-standard test-only value (defined in source) |[m
+[32m+[m[32m| Safety code | Lower 8 bytes of MD4 |[m
+[32m+[m[32m| Redundancy check code | CRC option B |[m
+[32m+[m[32m| Channels | 2 |[m
+[32m+[m[32m| `T_max` / heartbeat / `T_seq` | 1800 ms / 300 ms / 100 ms |[m
+[32m+[m[32m| `N_sendmax` / MWA | 20 / 10 |[m
+[32m+[m[32m| Defer / retransmission / application / diagnostic capacity | 4 / 20 / 20 / 16 |[m
+[32m+[m[32m| Packetization factor | 1 message per packet |[m
+[32m+[m
+[32m+[m[32mThe network identifier and MD4 value are deliberately non-production test[m
+[32m+[m[32mvalues. They are not secrets and must not be interpreted as approved operational[m
+[32m+[m[32mparameters.[m
+[32m+[m
+[32m+[m[32m## Known limitations[m
+[32m+[m
+[32m+[m[32m- The six-state vocabulary exists, but the complete DIN Table 18 event/state[m
+[32m+[m[32m  matrix is not implemented or exhaustively tested.[m
+[32m+[m[32m- Per-channel quality metrics, adaptive channel monitoring, and the full[m
+[32m+[m[32m  timing-diagnostic model are incomplete.[m
+[32m+[m[32m- Retransmission, confirmations, flow control, packetization, and timestamp[m
+[32m+[m[32m  handling have focused tests, but not a full standard conformance test suite.[m
+[32m+[m[32m- The test suite includes an in-memory two-channel peer test; it does not prove[m
+[32m+[m[32m  compatibility with another independent RaSTA implementation or platform.[m
+[32m+[m[32m- The core avoids dynamic allocation and has malformed-PDU no-panic testing,[m
+[32m+[m[32m  but this is not a formal whole-program no-panic proof.[m
+[32m+[m[32m- The desktop binary is an interoperability aid, not a production networking or[m
+[32m+[m[32m  deployment interface. Its fixed identifiers and example payload are test-only.[m
+[32m+[m
+[32m+[m[32m## Repository structure[m
+[32m+[m
+[32m+[m[32m```text[m
+[32m+[m[32mCargo.toml                         crate configuration[m
+[32m+[m[32mREADME.md                          project status and safe-use guidance[m
+[32m+[m[32mdocs/development-guide.md          learning/development guide[m
+[32m+[m[32mdocs/din-rasta-03-03-traceability.md  implementation-status traceability[m
+[32m+[m[32msrc/                               library and desktop demonstration[m
+[32m+[m[32m```[m
+ [m
+[31m-- no safety code,[m
+[31m-- lower 8 bytes of MD4,[m
+[31m-- full 16 bytes of MD4.[m
+[32m+[m[32m## Licence[m
+ [m
+[31m-The MD4 initial value is configurable and is used to separate RaSTA networks.[m
+[31m-The default is the standard MD4 initial value with the lower 8-byte safety code.[m
+[32m+[m[32mNo open-source licence has currently been assigned. All rights remain with the[m
+[32m+[m[32mcontributors unless a licence is added later. Consider keeping the repository[m
+[32m+[m[32mprivate until the project team or professor has selected an appropriate licence.[m
+[1mdiff --git a/docs/din-rasta-03-03-traceability.md b/docs/din-rasta-03-03-traceability.md[m
+[1mindex 9eb5a9c..a724c30 100644[m
+[1m--- a/docs/din-rasta-03-03-traceability.md[m
+[1m+++ b/docs/din-rasta-03-03-traceability.md[m
+[36m@@ -1,41 +1,60 @@[m
+[31m-# DIN RaSTA 03.03 interoperability-test profile - non-production[m
+[31m-[m
+[31m-This repository is being rewritten against DIN VDE V 0831-200 (VDE V 0831-200):2015-06. The values in `InteroperabilityProfile` are test values only; they are not a safety case or a certified deployment profile.[m
+[31m-[m
+[31m-## Replacement map[m
+[31m-[m
+[31m-| Existing module | Status | Replacement responsibility |[m
+[31m-|---|---|---|[m
+[31m-| `core/connection.rs` | Incompatible | Six-state SRL event matrix, timers, flow control, diagnostics |[m
+[31m-| `core/connection_state_machine.rs` | Partially replaced | Active six-state SRL vocabulary; complete Table 18 transition behavior remains pending |[m
+[31m-| `core/retransmission.rs` | Incompatible | 20-entry encoded-SRL-packet retention and confirmation validation |[m
+[31m-| `core/redundancy_management.rs` | Incompatible | RL state, two channels, defer queue, `T_seq`, channel diagnosis |[m
+[31m-| `core/safety_code.rs` | Retain after validation | DIN MD4-8/MD4-16 test vectors and immutable profile IV |[m
+[31m-| `core/pdu.rs` | Retain only as reference | Fixed reader/writer and type-specific 
