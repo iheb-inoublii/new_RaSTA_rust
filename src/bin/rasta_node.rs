@@ -1,8 +1,8 @@
 use rasta_stack::adapters::socket_transport::UdpSocketTransport;
 use rasta_stack::adapters::standard_clock::StdClock;
 use rasta_stack::adapters::standard_timer::StdTimer;
-use rasta_stack::adapters::test::MockTransport;
 use rasta_stack::application::service_interface::{ConnectionStatus, RastaService};
+use rasta_stack::config::DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE;
 use rasta_stack::core::connection::RastaConfig;
 use rasta_stack::core::redundancy::RedundancyConfig;
 use rasta_stack::core::safety_code::SafetyCodeConfig;
@@ -20,50 +20,80 @@ fn main() {
     let mode = &args[1];
     let remote_ip = &args[2];
 
-    let (local_addr, remote_addr, sender_id, remote_id) = if mode == "A" {
-        (
-            "0.0.0.0:5000",
-            format!("{}:5001", remote_ip),
-            0x1234,
-            0x5678,
-        )
-    } else if mode == "B" {
-        (
-            "0.0.0.0:5001",
-            format!("{}:5000", remote_ip),
-            0x5678,
-            0x1234,
-        )
-    } else {
-        println!("Invalid mode. Use A or B.");
-        return;
-    };
+    let (local_addr_a, remote_addr_a, local_addr_b, remote_addr_b, sender_id, remote_id) =
+        if mode == "A" {
+            (
+                "0.0.0.0:5000",
+                format!("{}:5001", remote_ip),
+                "0.0.0.0:6000",
+                format!("{}:6001", remote_ip),
+                0x1234,
+                0x5678,
+            )
+        } else if mode == "B" {
+            (
+                "0.0.0.0:5001",
+                format!("{}:5000", remote_ip),
+                "0.0.0.0:6001",
+                format!("{}:6000", remote_ip),
+                0x5678,
+                0x1234,
+            )
+        } else {
+            println!("Invalid mode. Use A or B.");
+            return;
+        };
 
     println!("Starting node {}", mode);
-    println!("Local address: {}", local_addr);
-    println!("Remote address: {}", remote_addr);
+    println!("Channel A: {} -> {}", local_addr_a, remote_addr_a);
+    println!("Channel B: {} -> {}", local_addr_b, remote_addr_b);
 
-    let transport = UdpSocketTransport::new(local_addr, &remote_addr).expect("Failed to bind UDP");
-    // Replace the second redundant transport with MockTransport
-    let transport_b = MockTransport::new();
+    let transport_a = match UdpSocketTransport::new(local_addr_a, &remote_addr_a) {
+        Ok(transport) => transport,
+        Err(error) => {
+            eprintln!("Failed to bind redundancy channel A: {error}");
+            return;
+        }
+    };
+    let transport_b = match UdpSocketTransport::new(local_addr_b, &remote_addr_b) {
+        Ok(transport) => transport,
+        Err(error) => {
+            eprintln!("Failed to bind redundancy channel B: {error}");
+            return;
+        }
+    };
 
     let config = RastaConfig {
         sender_id,
         remote_id,
-        safety_code: SafetyCodeConfig::default(),
+        safety_code: SafetyCodeConfig::md4_low8(
+            DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE.md4_initial_value,
+        ),
         redundancy: RedundancyConfig::default(),
         t_max: 2000,
         initial_seq: 0,
-        heartbeat_interval_ms: 500,
-        n_send_max: 16,
+        heartbeat_interval_ms: 300,
+        n_send_max: 20,
+        mwa: 10,
     };
 
-    let mut api = RastaService::new(transport, transport_b, StdTimer::new(), StdClock, config);
+    let mut api =
+        match RastaService::new(transport_a, transport_b, StdTimer::new(), StdClock, config) {
+            Ok(api) => api,
+            Err(error) => {
+                eprintln!("Invalid RaSTA configuration: {:?}", error);
+                return;
+            }
+        };
 
     if mode == "A" {
-        println!("Sending ConnectionRequest...");
-        api.open_connection()
-            .expect("Failed to initiate connection");
+        println!("Opening client connection...");
+    } else {
+        println!("Opening server connection...");
+    }
+    if let Err(error) = api.open_connection() {
+        eprintln!("Failed to open connection: {:?}", error);
+        return;
     }
 
     let mut last_state = api.status();
@@ -82,17 +112,20 @@ fn main() {
             last_state = current_state;
         }
 
-        if current_state == ConnectionStatus::Up {
-            if mode == "A" && !data_sent {
-                println!("Sending data: 'Hello from A'");
-                api.send_data(b"Hello from A").expect("Failed to send data");
-                data_sent = true;
+        if current_state == ConnectionStatus::Up && mode == "A" && !data_sent {
+            println!("Sending data: 'Hello from A'");
+            if let Err(error) = api.send_data(b"Hello from A") {
+                eprintln!("Failed to send data: {:?}", error);
+                break;
             }
+            data_sent = true;
         }
 
         if mode == "A" && data_sent && start_time.elapsed() > Duration::from_secs(5) {
             println!("Graceful disconnect...");
-            api.close_connection().expect("Failed to disconnect");
+            if let Err(error) = api.close_connection() {
+                eprintln!("Failed to disconnect: {:?}", error);
+            }
             break;
         }
 

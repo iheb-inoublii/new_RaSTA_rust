@@ -43,6 +43,10 @@ impl SafetyCodeConfig {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn calculate(&self, pdu_without_safety_code: &[u8]) -> [u8; 16] {
         match self.mode {
             SafetyCodeMode::None => [0; 16],
@@ -80,9 +84,9 @@ impl Md4 {
 
     pub fn with_initial_value(initial_value: [u8; 16]) -> Self {
         let mut state = [0u32; 4];
-        for i in 0..4 {
+        for (i, state_word) in state.iter_mut().enumerate() {
             let offset = i * 4;
-            state[i] = u32::from_le_bytes([
+            *state_word = u32::from_le_bytes([
                 initial_value[offset],
                 initial_value[offset + 1],
                 initial_value[offset + 2],

@@ -18,10 +18,10 @@ impl UdpSocketTransport {
 
 impl Transport for UdpSocketTransport {
     fn send(&mut self, data: &[u8]) -> Result<(), TransportError> {
-        self.socket
-            .send(data)
-            .map(|_| ())
-            .map_err(|_| TransportError::SendFailed)
+        match self.socket.send(data) {
+            Ok(sent) if sent == data.len() => Ok(()),
+            Ok(_) | Err(_) => Err(TransportError::SendFailed),
+        }
     }
 
     fn receive(&mut self, buffer: &mut [u8]) -> Result<usize, TransportError> {

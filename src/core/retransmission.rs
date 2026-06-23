@@ -4,7 +4,8 @@
 use crate::core::pdu::Packet;
 
 pub struct RetransmissionBuffer {
-    pub packets: [Option<Packet>; 16],
+    pub packets: [Option<Packet>; 20],
+    capacity: usize,
     // Oldest retained packet. When the fixed buffer is full, this packet is
     // replaced by the new one so the stack keeps moving without allocation.
     oldest_seq: Option<u32>,
@@ -18,14 +19,22 @@ impl Default for RetransmissionBuffer {
 
 impl RetransmissionBuffer {
     pub fn new() -> Self {
+        Self::with_capacity(20)
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
         const NONE_PACKET: Option<Packet> = None;
         RetransmissionBuffer {
-            packets: [NONE_PACKET; 16],
+            packets: [NONE_PACKET; 20],
+            capacity: capacity.min(20),
             oldest_seq: None,
         }
     }
 
     pub fn store(&mut self, packet: Packet) -> bool {
+        if self.count() >= self.capacity {
+            return false;
+        }
         for slot in self.packets.iter_mut() {
             if slot.is_none() {
                 let seq = packet.sequence_number;
@@ -35,19 +44,6 @@ impl RetransmissionBuffer {
             }
         }
 
-        if let Some(oldest) = self.oldest_seq {
-            for slot in self.packets.iter_mut() {
-                if slot
-                    .as_ref()
-                    .filter(|p| p.sequence_number == oldest)
-                    .is_some()
-                {
-                    *slot = Some(packet);
-                    self.recalculate_oldest();
-                    return true;
-                }
-            }
-        }
         false
     }
 

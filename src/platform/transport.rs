@@ -6,6 +6,8 @@ pub enum TransportError {
     SendFailed,
     ReceiveFailed,
     BufferTooSmall,
+    InvalidFrame,
+    SequenceViolation,
 }
 
 pub trait Transport {

@@ -1,8 +1,10 @@
 use crate::core::connection::{ConnectionError, RastaConfig, RastaConnection};
 use crate::core::connection_state_machine::RastaState;
 use crate::platform::clock::Clock;
+use crate::platform::random::RandomSource;
 use crate::platform::timer::Timer;
 use crate::platform::transport::Transport;
+use crate::srl::DiagnosticEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionStatus {
@@ -16,10 +18,12 @@ pub enum ConnectionStatus {
 impl From<RastaState> for ConnectionStatus {
     fn from(state: RastaState) -> Self {
         match state {
-            RastaState::Down => Self::Down,
+            RastaState::Down => Self::Opening,
             RastaState::Start => Self::Opening,
             RastaState::Up => Self::Up,
-            RastaState::Retransmission => Self::Retransmission,
+            RastaState::RetransmissionRequested | RastaState::RetransmissionRunning => {
+                Self::Retransmission
+            }
             RastaState::Closed => Self::Closing,
         }
     }
@@ -38,10 +42,30 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaService<T1, T
         timer: TimerCtx,
         clock: C,
         config: RastaConfig,
-    ) -> Self {
-        Self {
-            connection: RastaConnection::new(transport_a, transport_b, timer, clock, config),
-        }
+    ) -> Result<Self, ConnectionError> {
+        Ok(Self {
+            connection: RastaConnection::try_new(transport_a, transport_b, timer, clock, config)?,
+        })
+    }
+
+    pub fn new_with_random<R: RandomSource>(
+        transport_a: T1,
+        transport_b: T2,
+        timer: TimerCtx,
+        clock: C,
+        config: RastaConfig,
+        random: &mut R,
+    ) -> Result<Self, ConnectionError> {
+        Ok(Self {
+            connection: RastaConnection::try_new_with_random(
+                transport_a,
+                transport_b,
+                timer,
+                clock,
+                config,
+                random,
+            )?,
+        })
     }
 
     pub fn open_connection(&mut self) -> Result<(), ConnectionError> {
@@ -56,8 +80,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaService<T1, T
         if self.connection.state_machine.current_state != RastaState::Up {
             return Err(ConnectionError::StateTransitionInvalid);
         }
-        self.connection
-            .send_packet(crate::core::pdu::PacketType::Data, data)
+        self.connection.send_application_data(data)
     }
 
     pub fn poll(&mut self) -> Result<(), ConnectionError> {
@@ -70,6 +93,10 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaService<T1, T
 
     pub fn has_received_data(&self) -> bool {
         self.connection.has_received_data()
+    }
+
+    pub fn take_diagnostic(&mut self) -> Option<DiagnosticEvent> {
+        self.connection.take_diagnostic()
     }
 
     pub fn status(&self) -> ConnectionStatus {

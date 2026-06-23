@@ -39,6 +39,8 @@ pub enum PacketError {
     InvalidType,
     ChecksumMismatch,
     InvalidLength,
+    InvalidPayload,
+    UnsupportedProtocolVersion,
 }
 
 #[derive(Clone)]
@@ -75,6 +77,9 @@ impl Packet {
         }
         if buffer.len() < msg_len as usize {
             return Err(PacketError::BufferTooSmall);
+        }
+        if buffer.len() > msg_len as usize {
+            return Err(PacketError::InvalidLength);
         }
 
         // 2. Message Type (2 bytes)
@@ -169,7 +174,7 @@ impl Packet {
             dst.copy_from_slice(src);
         }
 
-        Ok(Packet {
+        let packet = Packet {
             receiver_id,
             sender_id,
             sequence_number,
@@ -179,7 +184,9 @@ impl Packet {
             packet_type,
             payload,
             payload_len,
-        })
+        };
+        packet.validate_payload_structure()?;
+        Ok(packet)
     }
 
     pub fn serialize(
@@ -190,6 +197,7 @@ impl Packet {
         if self.payload_len > Self::MAX_PAYLOAD_SIZE {
             return Err(PacketError::InvalidLength);
         }
+        self.validate_payload_structure()?;
         let safety_code_size = safety.len();
         let msg_len = Self::HEADER_SIZE + self.payload_len + safety_code_size;
         if buffer.len() < msg_len {
@@ -276,5 +284,35 @@ impl Packet {
         }
 
         Ok(msg_len)
+    }
+
+    fn validate_payload_structure(&self) -> Result<(), PacketError> {
+        match self.packet_type {
+            PacketType::ConnectionRequest | PacketType::ConnectionResponse => {
+                if self.payload_len != 14 {
+                    return Err(PacketError::InvalidPayload);
+                }
+                if self.payload.get(0..4) != Some(b"0303") {
+                    return Err(PacketError::UnsupportedProtocolVersion);
+                }
+                if self.payload.get(6..14) != Some(&[0; 8]) {
+                    return Err(PacketError::InvalidPayload);
+                }
+            }
+            PacketType::RetransmissionRequest
+            | PacketType::RetransmissionResponse
+            | PacketType::Heartbeat => {
+                if self.payload_len != 0 {
+                    return Err(PacketError::InvalidPayload);
+                }
+            }
+            PacketType::DisconnectionRequest => {
+                if self.payload_len != 4 {
+                    return Err(PacketError::InvalidPayload);
+                }
+            }
+            PacketType::Data | PacketType::RetransmissionData => {}
+        }
+        Ok(())
     }
 }
