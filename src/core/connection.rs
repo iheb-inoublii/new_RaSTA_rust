@@ -386,6 +386,8 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
                         if self.state_machine.current_state == RastaState::RetransmissionRequested {
                             self.sequence.accept_initial_rx(packet.sequence_number);
                             self.transition(RastaState::RetransmissionRunning)?;
+                        } else {
+                            return self.reject_unexpected_packet();
                         }
                     }
                     PacketType::DisconnectionRequest => {
@@ -413,7 +415,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
                         }
                     }
                     _ => {
-                        return Err(ConnectionError::UnexpectedPacket);
+                        return self.reject_unexpected_packet();
                     }
                 }
             }
