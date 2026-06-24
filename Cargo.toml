@@ -22,3 +22,4 @@ path = "src/bin/rasta_node.rs"
 required-features = ["std"]
 
 [dependencies]
+rasta-core = { path = "crates/rasta-core" }

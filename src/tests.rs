@@ -13,13 +13,10 @@ mod cases {
     use crate::core::safety_code::{Md4, SafetyCodeConfig};
     use crate::core::sequencing::{SequenceHandler, SequenceResult};
     use crate::core::time_supervision::{TimeSupervisionError, TimeSupervisor};
-    use crate::fixed_queue::{FixedQueue, FixedQueueError};
-    use crate::packet_io::{PacketIoError, PacketReader, PacketWriter};
     use crate::platform::clock::Clock;
     use crate::platform::random::{RandomError, RandomSource};
     use crate::platform::timer::Timer;
     use crate::platform::transport::{Transport, TransportError};
-    use crate::serial;
     use crate::srl::{DisconnectReason, SrlState};
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
@@ -731,43 +728,6 @@ mod cases {
         invalid = profile;
         invalid.md4_initial_value = InteroperabilityProfile::RFC_MD4_INITIAL_VALUE;
         assert_eq!(invalid.validate(), Err(ProfileError::UnsafeMd4InitialValue));
-    }
-
-    #[test]
-    fn serial_number_arithmetic_handles_wraparound() {
-        assert!(serial::is_after(0, u32::MAX));
-        assert!(serial::is_before(u32::MAX, 0));
-        assert_eq!(serial::forward_distance(u32::MAX, 1), 2);
-        assert!(serial::is_in_forward_window(1, u32::MAX, 2));
-        assert!(!serial::is_after(0x8000_0000, 0));
-    }
-
-    #[test]
-    fn fixed_queue_preserves_order_and_reports_overflow() {
-        let mut queue = FixedQueue::<u8, 2>::new();
-        assert!(queue.is_empty());
-        assert_eq!(queue.push(1), Ok(()));
-        assert_eq!(queue.push(2), Ok(()));
-        assert_eq!(queue.push(3), Err(FixedQueueError::Full));
-        assert_eq!(queue.len(), 2);
-        assert_eq!(queue.pop(), Some(1));
-        assert_eq!(queue.pop(), Some(2));
-        assert_eq!(queue.pop(), None);
-    }
-
-    #[test]
-    fn packet_reader_writer_are_checked() {
-        let mut bytes = [0u8; 6];
-        let mut writer = PacketWriter::new(&mut bytes);
-        assert_eq!(writer.write_u16_le(0x1234), Ok(()));
-        assert_eq!(writer.write_u32_le(0x89ab_cdef), Ok(()));
-        assert_eq!(writer.write_bytes(&[1]), Err(PacketIoError::BufferFull));
-
-        let mut reader = PacketReader::new(&bytes);
-        assert_eq!(reader.read_u16_le(), Ok(0x1234));
-        assert_eq!(reader.read_u32_le(), Ok(0x89ab_cdef));
-        assert_eq!(reader.read_u16_le(), Err(PacketIoError::Truncated));
-        assert_eq!(reader.remaining(), 0);
     }
 
     #[test]
