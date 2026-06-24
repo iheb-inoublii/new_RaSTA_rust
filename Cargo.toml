@@ -3,6 +3,15 @@ name = "rasta_stack"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "crates/rasta-core",
+    "crates/rasta-platform",
+    "apps/rasta-node",
+]
+
 [features]
 default = []
 std = []
