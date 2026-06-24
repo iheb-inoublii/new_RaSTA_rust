@@ -9,13 +9,7 @@ pub enum SafetyCodeLength {
     Md4Full16,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RedundancyCrc {
-    OptionB,
-    OptionC,
-    OptionD,
-    OptionE,
-}
+pub use rasta_core::redundancy::RedundancyCrc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProfileError {
