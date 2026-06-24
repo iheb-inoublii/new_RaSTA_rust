@@ -7,7 +7,6 @@ use crate::core::safety_code::SafetyCodeConfig;
 use crate::core::sequencing::{SequenceHandler, SequenceResult};
 use crate::platform::clock::Clock;
 use crate::platform::random::{RandomError, RandomSource};
-use crate::platform::timer::Timer;
 use crate::platform::transport::{Transport, TransportError};
 use crate::serial;
 use crate::srl::DisconnectReason;
@@ -15,6 +14,7 @@ use crate::{
     fixed_queue::{FixedQueue, FixedQueueError},
     srl::{DiagnosticEvent, DiagnosticKind, SrlErrorCounters},
 };
+use rasta_core::time::{DurationMs, MonotonicInstant, ProtocolTimestamp, ProtocolTimestampSource};
 
 #[derive(Debug)]
 pub enum ConnectionError {
@@ -47,11 +47,11 @@ pub struct RastaConfig {
     pub mwa: u16,
 }
 
-pub struct RastaConnection<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> {
+pub struct RastaConnection<T1: Transport, T2: Transport, C: Clock + ProtocolTimestampSource> {
     pub state_machine: StateMachine,
     pub redundancy: RedundancyLayer<T1, T2>,
     pub clock: C,
-    pub heartbeat: HeartbeatHandler<TimerCtx>,
+    pub heartbeat: HeartbeatHandler,
     pub sequence: SequenceHandler,
     pub retransmission: RetransmissionBuffer,
     pub sender_id: u32,
@@ -59,15 +59,16 @@ pub struct RastaConnection<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clo
     is_client: bool,
     pub safety_code: SafetyCodeConfig,
     pub t_max: u32,
+    t_max_duration: DurationMs,
     pub n_send_max: u16,
     pub mwa: u16,
     remote_n_send_max: u16,
     last_tx_sequence: Option<u32>,
     last_confirmed_by_peer: Option<u32>,
     received_since_ack: u16,
-    last_received_timestamp: u32,
-    confirmed_timestamp_reference: Option<u32>,
-    timeliness_deadline_ms: Option<u32>,
+    last_received_timestamp: ProtocolTimestamp,
+    confirmed_timestamp_reference: Option<ProtocolTimestamp>,
+    timeliness_deadline: Option<MonotonicInstant>,
     rx_buffer: [u8; 512],
     tx_buffer: [u8; 512],
     app_rx_buffer: [[u8; 256]; 20],
@@ -85,11 +86,10 @@ pub struct RastaConnection<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clo
     error_counters: SrlErrorCounters,
 }
 
-impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1, T2, TimerCtx, C> {
+impl<T1: Transport, T2: Transport, C: Clock + ProtocolTimestampSource> RastaConnection<T1, T2, C> {
     pub fn try_new(
         transport_a: T1,
         transport_b: T2,
-        timer: TimerCtx,
         clock: C,
         config: RastaConfig,
     ) -> Result<Self, ConnectionError> {
@@ -98,6 +98,9 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             || config.sender_id == config.remote_id
             || config.t_max == 0
             || config.heartbeat_interval_ms == 0
+            || !DurationMs::from_millis(config.t_max).is_unambiguous_timeout()
+            || !DurationMs::from_millis(config.heartbeat_interval_ms).is_unambiguous_timeout()
+            || !DurationMs::from_millis(config.redundancy.t_seq_ms).is_unambiguous_timeout()
             || config.n_send_max == 0
             || config.n_send_max > 20
             || config.mwa == 0
@@ -118,7 +121,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             state_machine: StateMachine::new(),
             redundancy: RedundancyLayer::with_config(transport_a, transport_b, config.redundancy),
             clock,
-            heartbeat: HeartbeatHandler::new(timer, config.heartbeat_interval_ms),
+            heartbeat: HeartbeatHandler::new(DurationMs::from_millis(config.heartbeat_interval_ms)),
             sequence: SequenceHandler::with_initial_tx(config.initial_seq),
             retransmission: RetransmissionBuffer::with_capacity(config.n_send_max as usize),
             sender_id: config.sender_id,
@@ -126,15 +129,16 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             is_client: config.sender_id < config.remote_id,
             safety_code: config.safety_code,
             t_max: config.t_max,
+            t_max_duration: DurationMs::from_millis(config.t_max),
             n_send_max: config.n_send_max,
             mwa: config.mwa,
             remote_n_send_max: config.n_send_max,
             last_tx_sequence: None,
             last_confirmed_by_peer: None,
             received_since_ack: 0,
-            last_received_timestamp: 0,
+            last_received_timestamp: ProtocolTimestamp::from_wire_millis(0),
             confirmed_timestamp_reference: None,
-            timeliness_deadline_ms: None,
+            timeliness_deadline: None,
             rx_buffer: [0; 512],
             tx_buffer: [0; 512],
             app_rx_buffer: [[0; 256]; 20],
@@ -156,13 +160,12 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
     pub fn try_new_with_random<R: RandomSource>(
         transport_a: T1,
         transport_b: T2,
-        timer: TimerCtx,
         clock: C,
         mut config: RastaConfig,
         random: &mut R,
     ) -> Result<Self, ConnectionError> {
         config.initial_seq = random.next_u32().map_err(ConnectionError::Random)?;
-        Self::try_new(transport_a, transport_b, timer, clock, config)
+        Self::try_new(transport_a, transport_b, clock, config)
     }
 
     pub fn transition(&mut self, new_state: RastaState) -> Result<(), ConnectionError> {
@@ -178,13 +181,13 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             return Err(ConnectionError::ProtocolViolation);
         }
         self.transition(RastaState::Down)?;
-        self.heartbeat.reset();
+        self.heartbeat.restart(self.clock.now());
         // DIN 5.5.12: the lower identification is the client.
         if self.sender_id > self.remote_id {
             return Ok(());
         }
         self.transition(RastaState::Start)?;
-        self.start_timeliness_monitor(self.clock.now_ms());
+        self.start_timeliness_monitor(self.clock.now());
         let payload = self.connection_payload();
         self.send_packet(
             PacketType::ConnectionRequest,
@@ -218,23 +221,26 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
     }
 
     pub fn process(&mut self) -> Result<(), ConnectionError> {
-        let local_now = self.clock.now_ms();
+        let local_now = self.clock.now();
         if self
-            .timeliness_deadline_ms
-            .is_some_and(|deadline| local_now == deadline || serial::is_after(local_now, deadline))
+            .timeliness_deadline
+            .is_some_and(|deadline| local_now.has_reached(deadline))
         {
-            self.record_diagnostic(DiagnosticKind::ConnectionTimeout, local_now);
+            self.record_diagnostic(
+                DiagnosticKind::ConnectionTimeout,
+                local_now.wrapping_millis(),
+            );
             self.disconnect_with_error()?;
             return Err(ConnectionError::SafetyTimeout);
         }
-        if self.heartbeat.is_due() {
+        if self.heartbeat.is_due(local_now) {
             if !matches!(
                 self.state_machine.current_state,
                 RastaState::Closed | RastaState::Down
             ) {
                 self.send_packet(PacketType::Heartbeat, &[])?;
             }
-            self.heartbeat.reset();
+            self.heartbeat.restart(local_now);
         }
 
         for _ in 0..32 {
@@ -300,7 +306,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             }
         }
 
-        let local_now = self.clock.now_ms();
+        let local_now = self.clock.now();
 
         match packet.packet_type {
             PacketType::ConnectionRequest
@@ -331,9 +337,9 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
         // DIN 5.5.6.1: copy the timestamp of every formally correct received
         // message into the next outbound PDU; only time-out related PDUs are
         // analysed by the adaptive monitor.
-        self.last_received_timestamp = packet.timestamp;
+        self.last_received_timestamp = ProtocolTimestamp::from_wire_millis(packet.timestamp);
         self.apply_timeliness(&packet, local_now)?;
-        self.heartbeat.reset();
+        self.heartbeat.restart(local_now);
         self.apply_confirmation(packet.confirmed_sequence_number)?;
 
         match self.state_machine.current_state {
@@ -342,7 +348,7 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
                 self.sequence.accept_initial_rx(packet.sequence_number);
                 self.apply_connection_payload(&packet)?;
                 self.transition(RastaState::Start)?;
-                self.heartbeat.reset();
+                self.heartbeat.restart(local_now);
                 let payload = self.connection_payload();
                 self.send_packet(
                     PacketType::ConnectionResponse,
@@ -493,8 +499,8 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             sender_id: self.sender_id,
             sequence_number: self.sequence.next_tx(),
             confirmed_sequence_number: self.sequence.last_received_seq().unwrap_or_default(),
-            timestamp: self.clock.now_ms(),
-            confirmed_timestamp: self.last_received_timestamp,
+            timestamp: self.clock.protocol_timestamp().wire_millis(),
+            confirmed_timestamp: self.last_received_timestamp.wire_millis(),
             payload: [0; 256],
             payload_len: payload.len(),
         };
@@ -579,17 +585,21 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
         Ok(())
     }
 
-    fn start_timeliness_monitor(&mut self, now_ms: u32) {
-        self.confirmed_timestamp_reference = Some(now_ms);
-        self.timeliness_deadline_ms = Some(now_ms.wrapping_add(self.t_max));
+    fn start_timeliness_monitor(&mut self, now: MonotonicInstant) {
+        self.confirmed_timestamp_reference = Some(self.clock.protocol_timestamp());
+        self.timeliness_deadline = Some(now.deadline_after(self.t_max_duration));
     }
 
     fn stop_timeliness_monitor(&mut self) {
         self.confirmed_timestamp_reference = None;
-        self.timeliness_deadline_ms = None;
+        self.timeliness_deadline = None;
     }
 
-    fn apply_timeliness(&mut self, packet: &Packet, now_ms: u32) -> Result<(), ConnectionError> {
+    fn apply_timeliness(
+        &mut self,
+        packet: &Packet,
+        now: MonotonicInstant,
+    ) -> Result<(), ConnectionError> {
         if !matches!(
             packet.packet_type,
             PacketType::Heartbeat | PacketType::Data | PacketType::RetransmissionData
@@ -597,9 +607,13 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             return Ok(());
         }
 
-        let reference = self.confirmed_timestamp_reference.unwrap_or(now_ms);
-        let confirmed_distance = packet.confirmed_timestamp.wrapping_sub(reference);
-        if confirmed_distance >= self.t_max {
+        let local_timestamp = self.clock.protocol_timestamp();
+        let reference = self
+            .confirmed_timestamp_reference
+            .unwrap_or(local_timestamp);
+        let confirmed_timestamp = ProtocolTimestamp::from_wire_millis(packet.confirmed_timestamp);
+        let confirmed_distance = confirmed_timestamp.wrapping_elapsed_since(reference);
+        if confirmed_distance.as_millis() >= self.t_max_duration.as_millis() {
             self.record_diagnostic(
                 DiagnosticKind::ConfirmedTimestampError,
                 packet.confirmed_timestamp,
@@ -608,18 +622,18 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaConnection<T1
             return Err(ConnectionError::SafetyTimeout);
         }
 
-        let round_trip_ms = now_ms.wrapping_sub(packet.confirmed_timestamp);
-        if round_trip_ms > self.t_max {
-            self.record_diagnostic(DiagnosticKind::ConnectionTimeout, round_trip_ms);
+        let round_trip = local_timestamp.wrapping_elapsed_since(confirmed_timestamp);
+        if round_trip.as_millis() > self.t_max_duration.as_millis() {
+            self.record_diagnostic(DiagnosticKind::ConnectionTimeout, round_trip.as_millis());
             self.disconnect_with_error()?;
             return Err(ConnectionError::SafetyTimeout);
         }
 
-        if packet.confirmed_timestamp == reference
-            || serial::is_after(packet.confirmed_timestamp, reference)
-        {
-            self.confirmed_timestamp_reference = Some(packet.confirmed_timestamp);
-            self.timeliness_deadline_ms = Some(now_ms.wrapping_add(self.t_max - round_trip_ms));
+        if confirmed_timestamp == reference || confirmed_timestamp.is_after(reference) {
+            self.confirmed_timestamp_reference = Some(confirmed_timestamp);
+            self.timeliness_deadline = Some(now.deadline_after(DurationMs::from_millis(
+                self.t_max_duration.as_millis() - round_trip.as_millis(),
+            )));
         }
         Ok(())
     }

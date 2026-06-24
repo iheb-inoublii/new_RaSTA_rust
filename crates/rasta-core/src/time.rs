@@ -17,6 +17,10 @@ impl DurationMs {
     pub const fn as_millis(self) -> u32 {
         self.0
     }
+
+    pub const fn is_unambiguous_timeout(self) -> bool {
+        self.0 < HALF_RANGE
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,9 +59,33 @@ pub trait MonotonicClock {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProtocolTimestamp(u32);
 
+impl ProtocolTimestamp {
+    pub const fn from_wire_millis(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub const fn wire_millis(self) -> u32 {
+        self.0
+    }
+
+    pub fn wrapping_elapsed_since(self, earlier: Self) -> DurationMs {
+        DurationMs(self.0.wrapping_sub(earlier.0))
+    }
+
+    pub fn is_after(self, reference: Self) -> bool {
+        self != reference && self.0.wrapping_sub(reference.0) < HALF_RANGE
+    }
+}
+
+/// Source of RaSTA packet timestamp values, deliberately separate from the
+/// internal monotonic instant used for deadlines.
+pub trait ProtocolTimestampSource {
+    fn protocol_timestamp(&self) -> ProtocolTimestamp;
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DurationMs, MonotonicInstant};
+    use super::{DurationMs, MonotonicInstant, ProtocolTimestamp};
 
     #[test]
     fn calculates_normal_elapsed_time() {
@@ -107,5 +135,16 @@ mod tests {
             !MonotonicInstant::from_wrapping_millis(0)
                 .has_reached(MonotonicInstant::from_wrapping_millis(0x8000_0000))
         );
+    }
+
+    #[test]
+    fn protocol_timestamps_compare_across_wrap() {
+        let before_wrap = ProtocolTimestamp::from_wire_millis(u32::MAX);
+        let after_wrap = ProtocolTimestamp::from_wire_millis(1);
+        assert_eq!(
+            after_wrap.wrapping_elapsed_since(before_wrap),
+            DurationMs::from_millis(2)
+        );
+        assert!(after_wrap.is_after(before_wrap));
     }
 }

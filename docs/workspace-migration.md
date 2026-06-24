@@ -30,3 +30,11 @@ crates/rasta-core
 4. Move concrete adapters to `rasta-platform`.
 5. Move the runnable node to `apps/rasta-node`.
 6. Remove temporary compatibility modules after import migration.
+
+## Time compatibility
+
+The active root connection uses `rasta_core::time::MonotonicClock` and typed
+deadlines. `platform::clock::Clock` is a compatibility alias for that canonical
+trait. `platform::timer::Timer` and `adapters::standard_timer::StdTimer` remain
+temporary compatibility scaffolding only; active protocol logic no longer uses
+them and they are planned for removal in a later migration step.

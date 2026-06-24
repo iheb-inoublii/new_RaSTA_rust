@@ -1,4 +1,5 @@
 use crate::port::TransportError;
+use crate::time::{DurationMs, MonotonicInstant};
 
 use super::frame::MAX_FRAME_SIZE;
 
@@ -7,7 +8,7 @@ pub(crate) struct DeferredFrame {
     pub(crate) bytes: [u8; MAX_FRAME_SIZE],
     pub(crate) len: usize,
     pub(crate) sequence: u32,
-    pub(crate) received_at_ms: u32,
+    pub(crate) received_at: MonotonicInstant,
 }
 
 pub(crate) struct DeferQueue {
@@ -24,7 +25,7 @@ impl DeferQueue {
         frame: &[u8],
         len: usize,
         sequence: u32,
-        received_at_ms: u32,
+        received_at: MonotonicInstant,
     ) -> Result<(), TransportError> {
         if self
             .entries
@@ -49,7 +50,7 @@ impl DeferQueue {
             bytes,
             len,
             sequence,
-            received_at_ms,
+            received_at,
         });
         Ok(())
     }
@@ -57,13 +58,13 @@ impl DeferQueue {
     pub(crate) fn take_ready(
         &mut self,
         expected_sequence: u32,
-        now_ms: u32,
-        t_seq_ms: u32,
+        now: MonotonicInstant,
+        t_seq: DurationMs,
     ) -> Option<DeferredFrame> {
         let index = self.entries.iter().position(|entry| {
             entry.is_some_and(|frame| {
                 frame.sequence == expected_sequence
-                    || now_ms.wrapping_sub(frame.received_at_ms) >= t_seq_ms
+                    || now.elapsed_since(frame.received_at).as_millis() >= t_seq.as_millis()
             })
         })?;
         self.entries[index].take()
@@ -74,18 +75,20 @@ impl DeferQueue {
 mod tests {
     use super::DeferQueue;
     use crate::port::TransportError;
+    use crate::time::{DurationMs, MonotonicInstant};
 
     #[test]
     fn retains_duplicates_once_and_reports_full_queue() {
         let mut queue = DeferQueue::new();
         let frame = [0u8; 8];
-        assert_eq!(queue.insert(&frame, 8, 1, 0), Ok(()));
-        assert_eq!(queue.insert(&frame, 8, 1, 0), Ok(()));
+        let now = MonotonicInstant::from_wrapping_millis(0);
+        assert_eq!(queue.insert(&frame, 8, 1, now), Ok(()));
+        assert_eq!(queue.insert(&frame, 8, 1, now), Ok(()));
         for sequence in 2..=4 {
-            assert_eq!(queue.insert(&frame, 8, sequence, 0), Ok(()));
+            assert_eq!(queue.insert(&frame, 8, sequence, now), Ok(()));
         }
         assert_eq!(
-            queue.insert(&frame, 8, 5, 0),
+            queue.insert(&frame, 8, 5, now),
             Err(TransportError::BufferTooSmall)
         );
     }
@@ -95,12 +98,45 @@ mod tests {
         let mut queue = DeferQueue::new();
         let mut frame = [0u8; 8];
         frame[0] = 1;
-        queue.insert(&frame, 8, 2, u32::MAX - 5).unwrap();
-        assert!(queue.take_ready(1, u32::MAX, 10).is_none());
-        let released = queue.take_ready(1, 4, 10).unwrap();
+        queue
+            .insert(
+                &frame,
+                8,
+                2,
+                MonotonicInstant::from_wrapping_millis(u32::MAX - 5),
+            )
+            .unwrap();
+        assert!(
+            queue
+                .take_ready(
+                    1,
+                    MonotonicInstant::from_wrapping_millis(u32::MAX),
+                    DurationMs::from_millis(10),
+                )
+                .is_none()
+        );
+        let released = queue
+            .take_ready(
+                1,
+                MonotonicInstant::from_wrapping_millis(4),
+                DurationMs::from_millis(10),
+            )
+            .unwrap();
         assert_eq!(released.sequence, 2);
 
-        queue.insert(&frame, 8, 3, 0).unwrap();
-        assert_eq!(queue.take_ready(3, 0, 100).unwrap().sequence, 3);
+        queue
+            .insert(&frame, 8, 3, MonotonicInstant::from_wrapping_millis(0))
+            .unwrap();
+        assert_eq!(
+            queue
+                .take_ready(
+                    3,
+                    MonotonicInstant::from_wrapping_millis(0),
+                    DurationMs::from_millis(100),
+                )
+                .unwrap()
+                .sequence,
+            3
+        );
     }
 }

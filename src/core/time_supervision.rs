@@ -1,5 +1,7 @@
 // Time / timestamp supervision for platform-independent RaSTA core logic.
 
+use rasta_core::time::{DurationMs, ProtocolTimestamp};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimeSupervisionError {
     TimestampTooOld,
@@ -8,8 +10,8 @@ pub enum TimeSupervisionError {
 
 #[derive(Debug, Clone, Copy)]
 pub struct TimeSupervisor {
-    pub t_max_ms: u32,
-    pub future_tolerance_ms: u32,
+    pub t_max: DurationMs,
+    pub future_tolerance: DurationMs,
 }
 
 impl TimeSupervisor {
@@ -17,25 +19,25 @@ impl TimeSupervisor {
 
     pub fn new(t_max_ms: u32) -> Self {
         Self {
-            t_max_ms,
-            future_tolerance_ms: Self::DEFAULT_FUTURE_TOLERANCE_MS,
+            t_max: DurationMs::from_millis(t_max_ms),
+            future_tolerance: DurationMs::from_millis(Self::DEFAULT_FUTURE_TOLERANCE_MS),
         }
     }
 
     pub fn validate(
         &self,
-        local_now_ms: u32,
-        remote_timestamp_ms: u32,
+        local_timestamp: ProtocolTimestamp,
+        remote_timestamp: ProtocolTimestamp,
     ) -> Result<(), TimeSupervisionError> {
-        let age = local_now_ms.wrapping_sub(remote_timestamp_ms);
+        let age = local_timestamp.wrapping_elapsed_since(remote_timestamp);
 
-        if age < 0x8000_0000 {
-            if age > self.t_max_ms {
+        if age.as_millis() < 0x8000_0000 {
+            if age.as_millis() > self.t_max.as_millis() {
                 return Err(TimeSupervisionError::TimestampTooOld);
             }
         } else {
-            let future_offset = remote_timestamp_ms.wrapping_sub(local_now_ms);
-            if future_offset > self.future_tolerance_ms {
+            let future_offset = remote_timestamp.wrapping_elapsed_since(local_timestamp);
+            if future_offset.as_millis() > self.future_tolerance.as_millis() {
                 return Err(TimeSupervisionError::TimestampTooFarInFuture);
             }
         }

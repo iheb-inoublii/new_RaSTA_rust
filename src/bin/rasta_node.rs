@@ -1,6 +1,5 @@
 use rasta_stack::adapters::socket_transport::UdpSocketTransport;
 use rasta_stack::adapters::standard_clock::StdClock;
-use rasta_stack::adapters::standard_timer::StdTimer;
 use rasta_stack::application::service_interface::{ConnectionStatus, RastaService};
 use rasta_stack::config::DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE;
 use rasta_stack::core::connection::RastaConfig;
@@ -85,14 +84,13 @@ fn main() {
         mwa: profile.mwa as u16,
     };
 
-    let mut api =
-        match RastaService::new(transport_a, transport_b, StdTimer::new(), StdClock, config) {
-            Ok(api) => api,
-            Err(error) => {
-                eprintln!("Invalid RaSTA configuration: {:?}", error);
-                return;
-            }
-        };
+    let mut api = match RastaService::new(transport_a, transport_b, StdClock::new(), config) {
+        Ok(api) => api,
+        Err(error) => {
+            eprintln!("Invalid RaSTA configuration: {:?}", error);
+            return;
+        }
+    };
 
     if mode == "A" {
         println!("Opening client connection...");

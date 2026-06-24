@@ -1,4 +1,5 @@
 use crate::port::{Transport, TransportError};
+use crate::time::{DurationMs, MonotonicInstant};
 
 use super::defer_queue::DeferQueue;
 use super::frame::{HEADER_SIZE, MAX_FRAME_SIZE, parse_header, payload_range, write_header};
@@ -61,12 +62,15 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
     }
 
     pub fn receive(&mut self, buffer: &mut [u8]) -> Result<usize, TransportError> {
-        self.receive_at(buffer, 0)
+        self.receive_at(buffer, MonotonicInstant::from_wrapping_millis(0))
     }
 
-    /// Temporary raw-millisecond boundary for the unmigrated root connection.
-    pub fn receive_at(&mut self, buffer: &mut [u8], now_ms: u32) -> Result<usize, TransportError> {
-        if let Some(length) = self.deliver_ready_deferred(buffer, now_ms)? {
+    pub fn receive_at(
+        &mut self,
+        buffer: &mut [u8],
+        now: MonotonicInstant,
+    ) -> Result<usize, TransportError> {
+        if let Some(length) = self.deliver_ready_deferred(buffer, now)? {
             return Ok(length);
         }
         let mut temporary = [0u8; MAX_FRAME_SIZE];
@@ -80,9 +84,7 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
             match result {
                 Ok(0) => {}
                 Ok(bytes_read) => {
-                    if let Some(length) =
-                        self.accept_frame(&temporary, bytes_read, buffer, now_ms)?
-                    {
+                    if let Some(length) = self.accept_frame(&temporary, bytes_read, buffer, now)? {
                         return Ok(length);
                     }
                 }
@@ -102,7 +104,7 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
         frame: &[u8],
         bytes_read: usize,
         output: &mut [u8],
-        now_ms: u32,
+        now: MonotonicInstant,
     ) -> Result<Option<usize>, TransportError> {
         let check_len = self.config.check_code_len();
         if bytes_read < HEADER_SIZE + check_len {
@@ -120,7 +122,7 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
             ReceiveSequence::Violation => return Err(TransportError::SequenceViolation),
             ReceiveSequence::Ahead => {
                 self.deferred
-                    .insert(frame, bytes_read, header.sequence, now_ms)?;
+                    .insert(frame, bytes_read, header.sequence, now)?;
                 return Ok(None);
             }
             ReceiveSequence::Expected => {}
@@ -133,12 +135,13 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
     fn deliver_ready_deferred(
         &mut self,
         output: &mut [u8],
-        now_ms: u32,
+        now: MonotonicInstant,
     ) -> Result<Option<usize>, TransportError> {
-        let Some(frame) =
-            self.deferred
-                .take_ready(self.sequence.expected(), now_ms, self.config.t_seq_ms)
-        else {
+        let Some(frame) = self.deferred.take_ready(
+            self.sequence.expected(),
+            now,
+            DurationMs::from_millis(self.config.t_seq_ms),
+        ) else {
             return Ok(None);
         };
         self.sequence.accept(frame.sequence);
@@ -227,6 +230,7 @@ mod tests {
     use super::RedundancyLayer;
     use crate::port::{Transport, TransportError};
     use crate::redundancy::{RedundancyCheckCode, RedundancyConfig, calculate};
+    use crate::time::MonotonicInstant;
     use std::cell::Cell;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -321,8 +325,13 @@ mod tests {
             no_crc(),
         );
         let mut output = [0u8; 32];
-        assert_eq!(layer.receive_at(&mut output, 0), Ok(0));
-        let received = layer.receive_at(&mut output, 100).unwrap();
+        assert_eq!(
+            layer.receive_at(&mut output, MonotonicInstant::from_wrapping_millis(0)),
+            Ok(0)
+        );
+        let received = layer
+            .receive_at(&mut output, MonotonicInstant::from_wrapping_millis(100))
+            .unwrap();
         assert_eq!(&output[..received], b"one");
     }
 
@@ -336,9 +345,13 @@ mod tests {
             no_crc(),
         );
         let mut output = [0u8; 32];
-        let received = layer.receive_at(&mut output, 0).unwrap();
+        let received = layer
+            .receive_at(&mut output, MonotonicInstant::from_wrapping_millis(0))
+            .unwrap();
         assert_eq!(&output[..received], b"zero");
-        let received = layer.receive_at(&mut output, 1).unwrap();
+        let received = layer
+            .receive_at(&mut output, MonotonicInstant::from_wrapping_millis(1))
+            .unwrap();
         assert_eq!(&output[..received], b"one");
     }
 

@@ -23,3 +23,4 @@ required-features = ["std"]
 
 [dependencies]
 rasta-core = { path = "crates/rasta-core" }
+rasta-platform = { path = "crates/rasta-platform" }

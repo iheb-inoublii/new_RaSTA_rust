@@ -15,9 +15,11 @@ mod cases {
     use crate::core::time_supervision::{TimeSupervisionError, TimeSupervisor};
     use crate::platform::clock::Clock;
     use crate::platform::random::{RandomError, RandomSource};
-    use crate::platform::timer::Timer;
     use crate::platform::transport::{Transport, TransportError};
     use crate::srl::{DisconnectReason, SrlState};
+    use rasta_core::time::{
+        DurationMs, MonotonicInstant, ProtocolTimestamp, ProtocolTimestampSource,
+    };
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
@@ -25,25 +27,13 @@ mod cases {
         time: u32,
     }
     impl Clock for MockClock {
-        fn now_ms(&self) -> u32 {
-            self.time
+        fn now(&self) -> MonotonicInstant {
+            MonotonicInstant::from_wrapping_millis(self.time)
         }
     }
-
-    struct MockTimer {
-        end_time: u32,
-        running: bool,
-    }
-    impl Timer for MockTimer {
-        fn start(&mut self, duration_ms: u32) {
-            self.end_time = duration_ms; // Simplified for test
-            self.running = true;
-        }
-        fn expired(&self) -> bool {
-            self.running
-        } // Simplified
-        fn stop(&mut self) {
-            self.running = false;
+    impl ProtocolTimestampSource for MockClock {
+        fn protocol_timestamp(&self) -> ProtocolTimestamp {
+            ProtocolTimestamp::from_wire_millis(self.time)
         }
     }
 
@@ -194,30 +184,42 @@ mod cases {
     struct SharedClock(Rc<Cell<u32>>);
 
     impl Clock for SharedClock {
-        fn now_ms(&self) -> u32 {
-            self.0.get()
+        fn now(&self) -> MonotonicInstant {
+            MonotonicInstant::from_wrapping_millis(self.0.get())
+        }
+    }
+    impl ProtocolTimestampSource for SharedClock {
+        fn protocol_timestamp(&self) -> ProtocolTimestamp {
+            ProtocolTimestamp::from_wire_millis(self.0.get())
         }
     }
 
-    struct SharedTimer {
-        clock: Rc<Cell<u32>>,
-        deadline: Option<u32>,
+    #[derive(Clone)]
+    struct FakeClock(Rc<Cell<u32>>);
+
+    impl FakeClock {
+        fn new(now: u32) -> Self {
+            Self(Rc::new(Cell::new(now)))
+        }
+
+        fn set(&self, now: u32) {
+            self.0.set(now);
+        }
+
+        fn advance(&self, duration: DurationMs) {
+            self.0.set(self.0.get().wrapping_add(duration.as_millis()));
+        }
     }
 
-    impl Timer for SharedTimer {
-        fn start(&mut self, duration_ms: u32) {
-            self.deadline = Some(self.clock.get().wrapping_add(duration_ms));
+    impl Clock for FakeClock {
+        fn now(&self) -> MonotonicInstant {
+            MonotonicInstant::from_wrapping_millis(self.0.get())
         }
+    }
 
-        fn expired(&self) -> bool {
-            self.deadline.is_some_and(|deadline| {
-                self.clock.get() == deadline
-                    || self.clock.get().wrapping_sub(deadline) < 0x8000_0000
-            })
-        }
-
-        fn stop(&mut self) {
-            self.deadline = None;
+    impl ProtocolTimestampSource for FakeClock {
+        fn protocol_timestamp(&self) -> ProtocolTimestamp {
+            ProtocolTimestamp::from_wire_millis(self.0.get())
         }
     }
 
@@ -329,16 +331,47 @@ mod cases {
     #[test]
     fn test_time_supervision() {
         let supervisor = TimeSupervisor::new(2000);
+        let timestamp = ProtocolTimestamp::from_wire_millis;
 
-        assert!(supervisor.validate(3000, 1500).is_ok());
+        assert!(
+            supervisor
+                .validate(timestamp(3000), timestamp(1500))
+                .is_ok()
+        );
         assert_eq!(
-            supervisor.validate(3000, 900),
+            supervisor.validate(timestamp(3000), timestamp(900)),
             Err(TimeSupervisionError::TimestampTooOld)
         );
         assert_eq!(
-            supervisor.validate(3000, 3200),
+            supervisor.validate(timestamp(3000), timestamp(3200)),
             Err(TimeSupervisionError::TimestampTooFarInFuture)
         );
+    }
+
+    #[test]
+    fn time_supervision_preserves_exact_boundaries_and_wraparound() {
+        let supervisor = TimeSupervisor::new(100);
+        let timestamp = ProtocolTimestamp::from_wire_millis;
+        assert!(supervisor.validate(timestamp(100), timestamp(0)).is_ok());
+        assert_eq!(
+            supervisor.validate(timestamp(101), timestamp(0)),
+            Err(TimeSupervisionError::TimestampTooOld)
+        );
+        assert!(
+            supervisor
+                .validate(timestamp(2), timestamp(u32::MAX - 2))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn fake_clock_advances_and_wraps_without_sleeping() {
+        let clock = FakeClock::new(u32::MAX - 2);
+        clock.advance(DurationMs::from_millis(5));
+        assert_eq!(clock.now().wrapping_millis(), 2);
+        assert_eq!(clock.protocol_timestamp().wire_millis(), 2);
+        clock.set(10);
+        assert_eq!(clock.now().wrapping_millis(), 10);
     }
 
     #[test]
@@ -369,15 +402,10 @@ mod cases {
     #[test]
     fn test_connection_handshake_start() {
         let clock = MockClock { time: 0 };
-        let timer = MockTimer {
-            end_time: 0,
-            running: false,
-        };
         let config = config(123, 456);
         let mut conn = RastaConnection::try_new(
             SimpleMockTransport::empty(),
             SimpleMockTransport::empty(),
-            timer,
             clock,
             config,
         )
@@ -394,10 +422,6 @@ mod cases {
         let connection = RastaConnection::try_new_with_random(
             SimpleMockTransport::empty(),
             SimpleMockTransport::empty(),
-            MockTimer {
-                end_time: 0,
-                running: false,
-            },
             MockClock { time: 0 },
             config(1, 2),
             &mut random,
@@ -411,10 +435,6 @@ mod cases {
         let mut connection = RastaConnection::try_new(
             SimpleMockTransport::empty(),
             SimpleMockTransport::empty(),
-            MockTimer {
-                end_time: 0,
-                running: false,
-            },
             MockClock { time: 0 },
             config(1, 2),
         )
@@ -439,10 +459,6 @@ mod cases {
         let mut client = RastaConnection::try_new(
             LinkedTransport::new(network.clone(), 0),
             LinkedTransport::new(network.clone(), 1),
-            SharedTimer {
-                clock: time.clone(),
-                deadline: None,
-            },
             SharedClock(time.clone()),
             config(1, 2),
         )
@@ -450,10 +466,6 @@ mod cases {
         let mut server = RastaConnection::try_new(
             LinkedTransport::new(network.clone(), 2),
             LinkedTransport::new(network, 3),
-            SharedTimer {
-                clock: time.clone(),
-                deadline: None,
-            },
             SharedClock(time.clone()),
             config(2, 1),
         )
@@ -491,10 +503,6 @@ mod cases {
         let mut connection = RastaConnection::try_new(
             SimpleMockTransport::empty(),
             SimpleMockTransport::empty(),
-            MockTimer {
-                end_time: 0,
-                running: false,
-            },
             MockClock { time: 0 },
             config(1, 2),
         )
@@ -542,10 +550,6 @@ mod cases {
     #[test]
     fn test_insecure_configuration_is_rejected() {
         let clock = MockClock { time: 0 };
-        let timer = MockTimer {
-            end_time: 0,
-            running: false,
-        };
         let mut insecure = config(1, 2);
         insecure.redundancy = RedundancyConfig {
             check_code: RedundancyCheckCode::None,
@@ -556,7 +560,6 @@ mod cases {
             RastaConnection::try_new(
                 SimpleMockTransport::empty(),
                 SimpleMockTransport::empty(),
-                timer,
                 clock,
                 insecure,
             )
@@ -567,14 +570,9 @@ mod cases {
     #[test]
     fn test_application_receive_queue() {
         let clock = MockClock { time: 0 };
-        let timer = MockTimer {
-            end_time: 0,
-            running: false,
-        };
         let mut conn = RastaConnection::try_new(
             SimpleMockTransport::empty(),
             SimpleMockTransport::empty(),
-            timer,
             clock,
             config(1, 2),
         )

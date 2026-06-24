@@ -2,9 +2,9 @@ use crate::core::connection::{ConnectionError, RastaConfig, RastaConnection};
 use crate::core::connection_state_machine::RastaState;
 use crate::platform::clock::Clock;
 use crate::platform::random::RandomSource;
-use crate::platform::timer::Timer;
 use crate::platform::transport::Transport;
 use crate::srl::DiagnosticEvent;
+use rasta_core::time::ProtocolTimestampSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionStatus {
@@ -29,29 +29,27 @@ impl From<RastaState> for ConnectionStatus {
     }
 }
 
-pub struct RastaService<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> {
-    connection: RastaConnection<T1, T2, TimerCtx, C>,
+pub struct RastaService<T1: Transport, T2: Transport, C: Clock + ProtocolTimestampSource> {
+    connection: RastaConnection<T1, T2, C>,
 }
 
-pub type RastaApi<T1, T2, TimerCtx, C> = RastaService<T1, T2, TimerCtx, C>;
+pub type RastaApi<T1, T2, C> = RastaService<T1, T2, C>;
 
-impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaService<T1, T2, TimerCtx, C> {
+impl<T1: Transport, T2: Transport, C: Clock + ProtocolTimestampSource> RastaService<T1, T2, C> {
     pub fn new(
         transport_a: T1,
         transport_b: T2,
-        timer: TimerCtx,
         clock: C,
         config: RastaConfig,
     ) -> Result<Self, ConnectionError> {
         Ok(Self {
-            connection: RastaConnection::try_new(transport_a, transport_b, timer, clock, config)?,
+            connection: RastaConnection::try_new(transport_a, transport_b, clock, config)?,
         })
     }
 
     pub fn new_with_random<R: RandomSource>(
         transport_a: T1,
         transport_b: T2,
-        timer: TimerCtx,
         clock: C,
         config: RastaConfig,
         random: &mut R,
@@ -60,7 +58,6 @@ impl<T1: Transport, T2: Transport, TimerCtx: Timer, C: Clock> RastaService<T1, T
             connection: RastaConnection::try_new_with_random(
                 transport_a,
                 transport_b,
-                timer,
                 clock,
                 config,
                 random,
