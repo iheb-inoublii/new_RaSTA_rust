@@ -29,11 +29,11 @@ Baseline before this phase:
 | `rasta-core/src/time.rs` | typed durations/instants/timestamps | time unit tests | heartbeat/time supervision tests | Covered | Covered | Covered | Covered | None for current helpers. |
 | `rasta-core/src/srl.rs` | disconnect reasons, diagnostics, counters | disconnect reason tests, diagnostics tests | connection tests | Covered | Partially covered | N/A | Partially covered | Not every diagnostic kind has a trigger path. |
 | `rasta-core/src/service.rs` | `RastaService`, `ConnectionStatus` | none direct | two-endpoint connection test, node smoke/manual | Indirectly covered | Partially covered | N/A | Indirectly covered | Direct facade error-path tests remain useful. |
-| `connection/mod.rs` | `RastaConnection` | many protocol tests | two-endpoint test | Covered | Partially covered | Covered for sequence/timeliness wraparound | Partially covered | Sequence-gap retransmission recovery and timeliness timeout paths are tested; full DIN event matrix remains incomplete. |
+| `connection/mod.rs` | `RastaConnection` | many protocol tests | two-endpoint test | Covered | Covered for implemented confirmation/timeliness failures | Covered for sequence, confirmation, and timeliness wraparound | Partially covered | Sequence-gap retransmission recovery, confirmed-sequence validation, and timeliness timeout paths are tested; full DIN event matrix remains incomplete. |
 | `connection/pdu.rs` | `Packet`, `PacketType`, parser/serializer | packet serialization, control PDU, malformed loop, PDU boundary tests | connection tests | Covered | Covered | Max payload covered | Covered | Future fuzzing recommended. |
 | `connection/state_machine.rs` | `StateMachine`, `RastaState` | exhaustive implemented-transition test | connection tests | Covered | Covered | N/A | Covered for implemented transitions | DIN-complete event table is not implemented. |
 | `connection/sequencing.rs` | `SequenceHandler` | sequence tests, wrap/duplicate/gap tests | connection tests | Covered | Covered | Covered | Covered for current behavior | Sentinel behavior after RX wrap is documented, not fixed. |
-| `connection/retransmission.rs` | `RetransmissionBuffer` | buffer/capacity/confirmation/window tests | retransmission recovery test | Covered | Covered | Covered | Covered for current behavior | Additional malformed request/disconnect combinations can be expanded. |
+| `connection/retransmission.rs` | `RetransmissionBuffer` | buffer/capacity/confirmation/window tests | retransmission and flow-control acknowledgement tests | Covered | Covered | Covered | Covered for current behavior | Additional malformed request/disconnect combinations can be expanded. |
 | `connection/safety_code.rs` | `Md4`, `SafetyCodeConfig` | MD4 vectors, DIN lower-half answer | PDU checksum tests | Covered | Covered | N/A | Covered | No alternate algorithm; MD4 behavior intentionally preserved. |
 | `connection/heartbeat.rs` | `HeartbeatHandler` | heartbeat restart/stop/wrap test | connection heartbeat loop | Covered | Covered | Covered | Covered | None for current helper. |
 | `connection/time_supervision.rs` | `TimeSupervisor` | exact boundary tests, timestamp classifier tests | connection timeliness tests | Covered | Covered | Covered | Covered for current behavior | Remote timestamp, confirmed timestamp, exact `T_max`, and wraparound paths are covered. |
@@ -54,6 +54,8 @@ Baseline before this phase:
 - Several private `connection/mod.rs` paths such as confirmation and timeliness
   application are covered through deterministic connection tests, not exhaustive
   direct unit tests.
+  Confirmation coverage includes first, duplicate, cumulative, empty-buffer,
+  invalid, flow-control, retransmission, and wraparound cases.
 
 ## Modules with no direct production-unit coverage
 

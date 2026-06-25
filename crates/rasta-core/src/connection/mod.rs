@@ -67,6 +67,7 @@ pub struct RastaConnection<
     pub n_send_max: u16,
     pub mwa: u16,
     remote_n_send_max: u16,
+    initial_tx_sequence: u32,
     last_tx_sequence: Option<u32>,
     last_confirmed_by_peer: Option<u32>,
     received_since_ack: u16,
@@ -139,6 +140,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             n_send_max: config.n_send_max,
             mwa: config.mwa,
             remote_n_send_max: config.n_send_max,
+            initial_tx_sequence: config.initial_seq,
             last_tx_sequence: None,
             last_confirmed_by_peer: None,
             received_since_ack: 0,
@@ -316,6 +318,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
 
         let local_now = self.clock.now();
         let timeliness_decision = self.validate_timeliness(&packet)?;
+        let peer_confirmation = self.validate_peer_confirmation(&packet)?;
 
         match packet.packet_type {
             PacketType::ConnectionRequest
@@ -348,13 +351,14 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             }
         }
 
+        self.apply_valid_confirmation(peer_confirmation);
+
         // DIN 5.5.6.1: copy the timestamp of every formally correct received
         // message into the next outbound PDU; only time-out related PDUs are
         // analysed by the adaptive monitor.
         self.last_received_timestamp = ProtocolTimestamp::from_wire_millis(packet.timestamp);
         self.apply_timeliness_decision(timeliness_decision, local_now);
         self.heartbeat.restart(local_now);
-        self.apply_confirmation(packet.confirmed_sequence_number)?;
 
         match self.state_machine.current_state {
             RastaState::Down if packet.packet_type == PacketType::ConnectionRequest => {
@@ -652,24 +656,66 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         Err(ConnectionError::UnexpectedPacket)
     }
 
-    fn apply_confirmation(&mut self, confirmed: u32) -> Result<(), ConnectionError> {
-        if let Some(previous) = self.last_confirmed_by_peer
-            && serial::is_before(confirmed, previous)
-        {
-            self.record_diagnostic(DiagnosticKind::ConfirmedSequenceError, confirmed);
-            self.disconnect_with_error()?;
-            return Err(ConnectionError::ProtocolViolation);
+    fn validate_peer_confirmation(
+        &mut self,
+        packet: &Packet,
+    ) -> Result<Option<u32>, ConnectionError> {
+        if !Self::packet_carries_peer_confirmation(packet.packet_type) {
+            return Ok(None);
         }
-        if let Some(last_sent) = self.last_tx_sequence
-            && serial::is_after(confirmed, last_sent)
-        {
-            self.record_diagnostic(DiagnosticKind::ConfirmedSequenceError, confirmed);
-            self.disconnect_with_error()?;
-            return Err(ConnectionError::ProtocolViolation);
+
+        let confirmed = packet.confirmed_sequence_number;
+        let last_peer_confirmed_sequence = self
+            .last_confirmed_by_peer
+            .unwrap_or_else(|| self.initial_tx_sequence.wrapping_sub(1));
+
+        let Some(newest_transmitted_sequence) = self.last_tx_sequence else {
+            if confirmed == last_peer_confirmed_sequence {
+                return Ok(Some(confirmed));
+            }
+            return self.reject_invalid_confirmation(confirmed);
+        };
+
+        let does_not_move_backwards = confirmed == last_peer_confirmed_sequence
+            || serial::is_after(confirmed, last_peer_confirmed_sequence);
+        let does_not_skip_beyond_newest = confirmed == newest_transmitted_sequence
+            || serial::is_before(confirmed, newest_transmitted_sequence);
+
+        if does_not_move_backwards && does_not_skip_beyond_newest {
+            Ok(Some(confirmed))
+        } else {
+            self.reject_invalid_confirmation(confirmed)
         }
-        self.last_confirmed_by_peer = Some(confirmed);
-        self.retransmission.clear_up_to(confirmed);
-        Ok(())
+    }
+
+    fn packet_carries_peer_confirmation(packet_type: PacketType) -> bool {
+        !matches!(
+            packet_type,
+            PacketType::ConnectionRequest | PacketType::RetransmissionRequest
+        )
+    }
+
+    fn reject_invalid_confirmation<T>(&mut self, confirmed: u32) -> Result<T, ConnectionError> {
+        self.record_diagnostic(DiagnosticKind::ConfirmedSequenceError, confirmed);
+        self.disconnect_with_error()?;
+        Err(ConnectionError::ProtocolViolation)
+    }
+
+    fn apply_valid_confirmation(&mut self, confirmed: Option<u32>) {
+        if let Some(confirmed) = confirmed {
+            self.last_confirmed_by_peer = Some(confirmed);
+            self.retransmission.clear_up_to(confirmed);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_peer_confirmed_sequence_for_test(&self) -> Option<u32> {
+        self.last_confirmed_by_peer
+    }
+
+    #[cfg(test)]
+    pub(crate) fn queued_application_tx_count_for_test(&self) -> usize {
+        self.app_tx_count
     }
 
     fn start_timeliness_monitor(&mut self, now: MonotonicInstant) {

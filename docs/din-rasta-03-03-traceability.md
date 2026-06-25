@@ -32,7 +32,7 @@ Clause references identify engineering areas only and do not reproduce DIN text.
 | Data transfer and packetization factor 1 | Partially implemented; tested | `connection::{send_application_data, receive_data}` | `two_endpoint_two_channel_connection_and_data_interoperate`, `test_application_receive_queue` |
 | Flow control (`N_sendmax`, MWA) | Partially implemented; partially tested | `connection::{can_send_data, flush_application_tx}` | `application_tx_queue_is_bounded_when_flow_control_blocks`; full conformance pending |
 | Sequence arithmetic and wraparound | Implemented and tested | `serial`, `connection::sequencing::SequenceHandler` | serial tests, `sequencing_duplicates_gaps_range_and_wraparound_are_classified` |
-| Confirmed sequence handling | Implemented but incompletely tested | `connection::apply_confirmation`, `retransmission::clear_up_to` | retransmission confirmation tests; full connection-level boundary matrix pending |
+| Confirmed sequence handling | Implemented and tested for current local behavior | `connection::{validate_peer_confirmation,apply_valid_confirmation}`, `retransmission::clear_up_to`, `serial` | `confirmed_sequence_first_duplicate_single_cumulative_and_boundaries_release_exactly`, `confirmed_sequence_with_empty_retransmission_buffer_updates_ack_without_release`, `confirmed_sequence_initial_values_zero_one_max_and_before_max_are_not_sentinels`, `wraparound_confirmation_releases_only_confirmed_window_entries`, invalid confirmation tests |
 | Retransmission request/response/data | Implemented and tested for deterministic sequence-gap recovery | `connection::{send_retransmission_request, send_retransmission_response, retransmit_from, handle_packet}`, `retransmission::RetransmissionBuffer` | `retransmission_request_uses_zero_payload_and_confirmed_sequence_point`, `sequence_gap_retransmission_recovers_lost_data_in_order`, `retransmit_from_validates_window_and_propagates_transport_failure` |
 | Timestamp and heartbeat supervision | Implemented and tested for current local behavior | `time`, `connection::time_supervision`, `connection::heartbeat`, `connection::{validate_timeliness,apply_timeliness_decision}` | time tests, heartbeat tests, `time_supervision_preserves_exact_boundaries_and_wraparound`, `timestamp_validation_covers_future_boundary_and_half_range`, `confirmed_timestamp_validation_covers_progression_repeat_future_and_wrap`, `peer_silence_times_out_at_exact_t_max_and_sends_disconnect_once`, `valid_peer_heartbeat_restarts_deadline_but_sent_heartbeat_alone_does_not`, invalid timestamp tests, two-endpoint heartbeat loop |
 | Diagnostics and SRL counters | Partially implemented; tested for implemented triggers | `srl::{DiagnosticEvent, SrlErrorCounters}`, `connection::record_diagnostic` | `bad_safety_code_is_rejected_and_counted_without_closing_connection`, `diagnostics_queue_overflow_is_counted_without_unrelated_counter_changes` |
@@ -53,8 +53,8 @@ node profile is explicitly academic and non-production.
 ## Verification recommendations
 
 - Expand malformed retransmission-request and disconnect-path coverage.
-- Expand connection-level confirmation boundary tests beyond the current
-  timeliness and retransmission coverage.
+- Independently review the DIN interpretation for which control PDU
+  confirmation fields are acknowledgements versus request points.
 - Add parser fuzzing in a separate phase if tooling is approved.
 - Perform independent-peer interoperability only after deterministic local
   coverage and project requirements are stable.
