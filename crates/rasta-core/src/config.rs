@@ -1,7 +1,4 @@
-//! DIN RaSTA 03.03 interoperability-test profile - non-production.
-//!
-//! Values in this module are test values only. A deployment must provide a
-//! project-approved profile and safety case.
+//! Platform-independent RaSTA configuration types and profile validation.
 
 use crate::connection::safety_code::SafetyCodeConfig;
 use crate::redundancy::{RedundancyConfig, RedundancyCrc};
@@ -94,30 +91,3 @@ impl InteroperabilityProfile {
         Ok(())
     }
 }
-
-pub const DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE: InteroperabilityProfile =
-    InteroperabilityProfile {
-        // Test-only interoperability profile. Not approved for production or
-        // railway operational use.
-        protocol_version: InteroperabilityProfile::VERSION_03_03,
-        safety_code_length: SafetyCodeLength::Md4Lower8,
-        redundancy_crc: RedundancyCrc::OptionB,
-        channel_count: 2,
-        // Test-only RaSTA network identifier; not an operational allocation.
-        network_identifier: 0x0000_0001,
-        // A=0x67452302, B=0xEFCDAB98, C=0x98BADCFF, D=0x10325477, little-endian words.
-        md4_initial_value: [
-            0x02, 0x23, 0x45, 0x67, 0x98, 0xab, 0xcd, 0xef, 0xff, 0xdc, 0xba, 0x98, 0x77, 0x54,
-            0x32, 0x10,
-        ],
-        t_max_ms: 1_800,
-        t_h_ms: 300,
-        t_seq_ms: 100,
-        n_send_max: 20,
-        mwa: 10,
-        defer_queue_capacity: 4,
-        retransmission_capacity: 20,
-        application_queue_capacity: 20,
-        diagnostic_queue_capacity: 16,
-        max_messages_per_packet: 1,
-    };

@@ -1,19 +1,8 @@
 # Cargo workspace migration
 
-## Temporary state
+## Current active architecture
 
-This repository now has a Cargo workspace skeleton. The platform-independent
-RaSTA protocol implementation is canonical in `rasta-core`: configuration, SRL
-types, service facade, connection handling, PDU encode/decode, safety code,
-sequencing, retransmission, heartbeat, time supervision, fixed queues, packet
-I/O, serial arithmetic, port traits, and redundancy.
-
-The original root package, `rasta_stack`, remains in place as a temporary
-compatibility facade. Its protocol module paths forward to `rasta-core` while
-the concrete adapters and current demonstration binary remain in the root
-package for now.
-
-## Target dependency direction
+The active dependency direction is:
 
 ```text
 rasta-node
@@ -23,7 +12,31 @@ rasta-platform
 rasta-core
 ```
 
-`rasta-core` must never depend on `rasta-platform` or `rasta-node`.
+`rasta-core` owns the platform-independent protocol implementation:
+configuration types, SRL types, service facade, connection handling, PDU
+encode/decode, safety code, sequencing, retransmission, heartbeat, time
+supervision, fixed queues, packet I/O, serial arithmetic, port traits, and
+redundancy.
+
+`rasta-platform` owns concrete platform adapters:
+
+- `rasta_platform::udp::UdpSocketTransport`
+- `rasta_platform::std_clock::StdClock`
+- `rasta_platform::embedded_ethernet::{EmbeddedEthernetAdapter, EmbeddedEthernetDriver}`
+
+`apps/rasta-node` owns the runnable demonstration node and the academic
+interoperability-test profile in `apps/rasta-node/src/profile.rs`.
+
+The original root package, `rasta_stack`, remains in place as a temporary
+compatibility facade. Its retained protocol and adapter paths forward to the
+canonical workspace crates.
+
+## Removed obsolete compatibility modules
+
+The old `Timer` abstraction and `StdTimer` adapter were removed after typed
+monotonic deadlines became canonical. The unused logger trait, Linux/Windows UDP
+alias modules, and public mock transport module were also removed because they
+had no active consumers.
 
 ## Planned phases
 
@@ -32,7 +45,8 @@ rasta-core
 3. Replace the clock abstraction with typed monotonic time and add tests.
 4. Move concrete adapters to `rasta-platform`.
 5. Move the runnable node to `apps/rasta-node`.
-6. Remove temporary compatibility modules after import migration.
+6. Remove remaining temporary compatibility modules after downstream import
+   migration.
 
 ## Protocol state names
 
@@ -40,14 +54,6 @@ rasta-core
 machine. `srl::SrlState` is retained as an SRL-facing public type for
 compatibility; it is not used internally to protect or advance connection
 state.
-
-## Time compatibility
-
-The active connection uses `rasta_core::time::MonotonicClock` and typed
-deadlines. `platform::clock::Clock` is a compatibility alias for that canonical
-trait. `platform::timer::Timer` and `adapters::standard_timer::StdTimer` remain
-temporary compatibility scaffolding only; active protocol logic no longer uses
-them and they are planned for removal in a later migration step.
 
 ## Concurrency boundary
 

@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod cases {
-    use crate::config::{
-        DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, InteroperabilityProfile, ProfileError,
-    };
+    use crate::config::{InteroperabilityProfile, ProfileError, SafetyCodeLength};
     use crate::connection::pdu::{Packet, PacketType};
     use crate::connection::retransmission::RetransmissionBuffer;
     use crate::connection::safety_code::{Md4, SafetyCodeConfig};
@@ -11,7 +9,9 @@ mod cases {
     use crate::connection::time_supervision::{TimeSupervisionError, TimeSupervisor};
     use crate::connection::{RastaConfig, RastaConnection};
     use crate::port::{RandomError, RandomSource, Transport, TransportError};
-    use crate::redundancy::{RedundancyCheckCode, RedundancyConfig, RedundancyLayer};
+    use crate::redundancy::{
+        RedundancyCheckCode, RedundancyConfig, RedundancyCrc, RedundancyLayer,
+    };
     use crate::srl::{DisconnectReason, SrlState};
     use crate::time::{
         DurationMs, MonotonicClock, MonotonicInstant, ProtocolTimestamp, ProtocolTimestampSource,
@@ -619,8 +619,28 @@ mod cases {
     }
 
     #[test]
-    fn din_interoperability_profile_is_valid_and_immutable_by_copy() {
-        let profile = DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE;
+    fn interoperability_profile_validation_is_value_based() {
+        let profile = InteroperabilityProfile {
+            protocol_version: InteroperabilityProfile::VERSION_03_03,
+            safety_code_length: SafetyCodeLength::Md4Lower8,
+            redundancy_crc: RedundancyCrc::OptionB,
+            channel_count: 2,
+            network_identifier: 0x0000_0001,
+            md4_initial_value: [
+                0x02, 0x23, 0x45, 0x67, 0x98, 0xab, 0xcd, 0xef, 0xff, 0xdc, 0xba, 0x98, 0x77, 0x54,
+                0x32, 0x10,
+            ],
+            t_max_ms: 1_800,
+            t_h_ms: 300,
+            t_seq_ms: 100,
+            n_send_max: 20,
+            mwa: 10,
+            defer_queue_capacity: 4,
+            retransmission_capacity: 20,
+            application_queue_capacity: 20,
+            diagnostic_queue_capacity: 16,
+            max_messages_per_packet: 1,
+        };
         assert_eq!(profile.protocol_version, *b"0303");
         assert!(profile.validate().is_ok());
 

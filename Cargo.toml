@@ -16,11 +16,6 @@ members = [
 default = []
 std = []
 
-[[bin]]
-name = "rasta_node"
-path = "src/bin/rasta_node.rs"
-required-features = ["std"]
-
 [dependencies]
 rasta-core = { path = "crates/rasta-core" }
 rasta-platform = { path = "crates/rasta-platform" }
