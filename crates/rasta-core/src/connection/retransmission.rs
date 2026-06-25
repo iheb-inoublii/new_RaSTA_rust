@@ -92,6 +92,10 @@ impl RetransmissionBuffer {
             .find(|p| p.sequence_number == seq)
     }
 
+    pub fn contains(&self, seq: u32) -> bool {
+        self.get_packet(seq).is_some()
+    }
+
     pub fn count(&self) -> usize {
         self.packets.iter().flatten().count()
     }

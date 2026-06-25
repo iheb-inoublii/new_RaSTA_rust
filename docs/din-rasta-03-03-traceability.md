@@ -33,8 +33,8 @@ Clause references identify engineering areas only and do not reproduce DIN text.
 | Flow control (`N_sendmax`, MWA) | Partially implemented; partially tested | `connection::{can_send_data, flush_application_tx}` | `application_tx_queue_is_bounded_when_flow_control_blocks`; full conformance pending |
 | Sequence arithmetic and wraparound | Implemented and tested | `serial`, `connection::sequencing::SequenceHandler` | serial tests, `sequencing_duplicates_gaps_range_and_wraparound_are_classified` |
 | Confirmed sequence handling | Implemented but incompletely tested | `connection::apply_confirmation`, `retransmission::clear_up_to` | retransmission confirmation tests; full connection-level boundary matrix pending |
-| Retransmission request/response/data | Partially implemented; incompletely tested | `connection::{retransmit_from, handle_packet}`, `retransmission::RetransmissionBuffer` | buffer tests; end-to-end loss/recovery remains pending |
-| Timestamp and heartbeat supervision | Partially implemented; tested for helpers and local operation | `time`, `connection::time_supervision`, `connection::heartbeat`, `connection::apply_timeliness` | time tests, heartbeat tests, `time_supervision_preserves_exact_boundaries_and_wraparound`, two-endpoint heartbeat loop |
+| Retransmission request/response/data | Implemented and tested for deterministic sequence-gap recovery | `connection::{send_retransmission_request, send_retransmission_response, retransmit_from, handle_packet}`, `retransmission::RetransmissionBuffer` | `retransmission_request_uses_zero_payload_and_confirmed_sequence_point`, `sequence_gap_retransmission_recovers_lost_data_in_order`, `retransmit_from_validates_window_and_propagates_transport_failure` |
+| Timestamp and heartbeat supervision | Implemented and tested for current local behavior | `time`, `connection::time_supervision`, `connection::heartbeat`, `connection::{validate_timeliness,apply_timeliness_decision}` | time tests, heartbeat tests, `time_supervision_preserves_exact_boundaries_and_wraparound`, `timestamp_validation_covers_future_boundary_and_half_range`, `confirmed_timestamp_validation_covers_progression_repeat_future_and_wrap`, `peer_silence_times_out_at_exact_t_max_and_sends_disconnect_once`, `valid_peer_heartbeat_restarts_deadline_but_sent_heartbeat_alone_does_not`, invalid timestamp tests, two-endpoint heartbeat loop |
 | Diagnostics and SRL counters | Partially implemented; tested for implemented triggers | `srl::{DiagnosticEvent, SrlErrorCounters}`, `connection::record_diagnostic` | `bad_safety_code_is_rejected_and_counted_without_closing_connection`, `diagnostics_queue_overflow_is_counted_without_unrelated_counter_changes` |
 | Concrete UDP platform adapter | Implemented and tested locally | `rasta_platform::udp::UdpSocketTransport` | UDP bind/empty receive/loopback tests; external interoperability pending |
 | Standard clock adapter | Implemented and tested structurally | `rasta_platform::std_clock::StdClock` | standard-clock monotonic/protocol timestamp tests |
@@ -52,8 +52,9 @@ node profile is explicitly academic and non-production.
 
 ## Verification recommendations
 
-- Complete deterministic end-to-end retransmission loss/recovery tests.
-- Expand connection-level timeout and confirmation boundary tests.
+- Expand malformed retransmission-request and disconnect-path coverage.
+- Expand connection-level confirmation boundary tests beyond the current
+  timeliness and retransmission coverage.
 - Add parser fuzzing in a separate phase if tooling is approved.
 - Perform independent-peer interoperability only after deterministic local
   coverage and project requirements are stable.
