@@ -1,0 +1,10 @@
+[package]
+name = "rasta-platform"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "rasta_platform"
+
+[dependencies]
+rasta-core = { path = "../rasta-core" }

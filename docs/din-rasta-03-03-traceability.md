@@ -1,60 +1,59 @@
 # DIN RaSTA 03.03 traceability notes — non-production
 
 This is an implementation-status aid for an academic interoperability-test
-profile. It is not a compliance matrix, a conformance claim, or a safety case.
-Clause references identify the engineering area reviewed; they do not reproduce
-the DIN text. Project-specific values and acceptance criteria require an
-approved interface-control specification and safety case.
+profile. It is not a compliance matrix, conformance claim, or safety case.
+Clause references identify engineering areas only and do not reproduce DIN text.
 
 ## Status vocabulary
 
 | Status | Meaning |
 |---|---|
-| Implemented | Code exists and has a directly relevant automated test. |
-| Partially implemented | Some behaviour exists, but coverage or required behaviour is incomplete. |
-| Tested | Behaviour is covered by the named repository test; this is not conformance evidence. |
-| Untested | Code exists but no directly relevant automated test was identified. |
-| Planned | Identified work; not implemented. |
-| Project-specific | A decision/value must be supplied by an approved project. |
-| Not applicable | Not used by this test profile; it may still be relevant to another project. |
+| Implemented and tested | Code exists and has directly relevant automated tests. |
+| Implemented but incompletely tested | Code exists; branch/event coverage is incomplete. |
+| Partially implemented | Some required behavior exists, but the implementation is incomplete. |
+| Not implemented | No active implementation exists. |
+| Project-configurable | Values must come from a project profile/safety case. |
+| External interoperability pending | Local tests pass; independent-peer evidence is not yet available. |
 
 ## Traceability summary
 
-| Area | Status | Code location | Evidence / notes |
+| Area / requirement theme | Status | Implementation module / function | Test evidence |
 |---|---|---|---|
-| Test-only profile, version `0303`, capacities, timings | Implemented; Project-specific for production | `config::InteroperabilityProfile`, `DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE` | `tests::din_interoperability_profile_is_valid_and_immutable_by_copy` validates the test profile only. |
-| Fixed-size core buffers and queues | Implemented; Partially tested | `core::connection::RastaConnection`, `fixed_queue::FixedQueue` | `tests::fixed_queue_preserves_order_and_reports_overflow`; no formal resource-bound analysis. |
-| Checked PDU read/write and control-PDU structure | Implemented; Tested | `core::pdu::Packet`, `packet_io::{PacketReader, PacketWriter}` | `tests::packet_reader_writer_are_checked`, `tests::din_control_pdus_enforce_exact_payload_rules`, `tests::pdu_parser_does_not_panic_on_malformed_input`. |
-| MD4 lower-8 safety code using test IV | Implemented; Tested | `core::safety_code::SafetyCodeConfig` | `tests::md4_safety_code_matches_din_annex_a_lower_half`; test configuration only. |
-| RL CRC options B/C/D/E | Implemented; Tested | `redundancy_crc::calculate` | `redundancy_crc::tests::din_clause_6_3_6_known_answers`. The executable selects option B. |
-| RL two-channel duplicated send and duplicate suppression | Partially implemented; Tested | `core::redundancy_management::RedundancyLayer` | `tests::test_redundancy_discards_duplicate_channel_copy`, `tests::two_endpoint_two_channel_connection_and_data_interoperate`. No physical-channel quality model. |
-| RL defer queue and `T_seq` | Partially implemented; Tested | `RedundancyLayer::{defer, deliver_expired_deferred}` | `tests::redundancy_defers_ahead_frame_until_missing_sequence_arrives`, `tests::redundancy_releases_deferred_frame_after_t_seq`. Capacity is fixed at four. |
-| SRL connection establishment and `Up` transition | Partially implemented; Tested | `core::connection::{connect, handle_packet}` | `tests::test_connection_handshake_start`, `tests::two_endpoint_two_channel_connection_and_data_interoperate`. Independent-peer interoperability is untested. |
-| Six-state SRL vocabulary | Partially implemented; Tested structurally | `core::connection_state_machine::{RastaState, StateMachine}` | `tests::test_state_machine_transitions`. Complete Table 18 event/state behaviour is planned. |
-| Data transfer and one-message packetization | Partially implemented; Tested | `connection::{send_application_data, enqueue_application_data}` | `tests::two_endpoint_two_channel_connection_and_data_interoperate`, `tests::test_application_receive_queue`. |
-| `N_sendmax`, MWA, bounded queues | Partially implemented; Partially tested | `connection::{can_send_data, flush_application_tx}` | `tests::application_tx_queue_is_bounded_when_flow_control_blocks`; no complete standards conformance suite. |
-| Sequence arithmetic and wraparound helpers | Implemented; Tested | `serial`, `core::sequencing::SequenceHandler` | `tests::serial_number_arithmetic_handles_wraparound`, `tests::test_sequence_handler`. |
-| Confirmed sequence number handling | Partially implemented; Untested at full matrix level | `connection::apply_confirmation` | Boundary and state/event coverage remains incomplete. |
-| Timestamp/timeout supervision | Partially implemented; Partially tested | `connection::{apply_timeliness, start_timeliness_monitor}` | `tests::test_time_supervision` and extended heartbeat loop in `tests::two_endpoint_two_channel_connection_and_data_interoperate`; full timing diagnostics are planned. |
-| Heartbeat and connection teardown | Partially implemented; Partially tested | `core::heartbeat::HeartbeatHandler`, `connection::{disconnect, send_disconnect}` | Local demo exercises these paths; no exhaustive automated event matrix. |
-| Retransmission request/response/data | Partially implemented; Untested end-to-end | `connection::{retransmit_from, handle_packet}`, `core::retransmission::RetransmissionBuffer` | `tests::test_retransmission_buffer` only; end-to-end loss/recovery coverage is planned. |
-| Diagnostics and SRL counters | Partially implemented; Untested for all conditions | `srl::{DiagnosticEvent, SrlErrorCounters}`, `connection::record_diagnostic` | `tests::bad_safety_code_is_rejected_and_counted_without_closing_connection` covers one case. |
-| Per-channel quality and adaptive monitoring | Planned | — | No separate channel error/drop counters or standard-complete adaptive monitoring. |
-| Desktop UDP adapter | Implemented; Manually exercised | `adapters::socket_transport::UdpSocketTransport`, `bin/rasta_node.rs` | Local loopback use is documented; Windows/Linux independent-peer interoperability remains untested. |
+| Academic profile validation and parameter typing | Implemented and tested; project-configurable for production | `rasta_core::config::{InteroperabilityProfile, RastaConfig}`, `apps/rasta-node/src/profile.rs` | `interoperability_profile_validation_reports_each_typed_error`, `academic_profile_is_valid_and_values_are_unchanged` |
+| Fixed-size bounded storage | Implemented and tested | `queue::FixedQueue`, `connection::RastaConnection` buffers, redundancy defer queues | `queue::tests::preserves_order_and_reports_overflow`, `application_tx_queue_is_bounded_when_flow_control_blocks`, defer-queue tests |
+| PDU wire layout, type values, payload rules | Implemented and tested | `connection::pdu::{Packet, PacketType}` | `test_packet_serialization`, `pdu_message_types_lengths_and_payload_rules_are_enforced`, `pdu_connection_version_and_max_payload_boundaries_are_enforced`, `pdu_parser_does_not_panic_on_malformed_input` |
+| Safety code using MD4 and configured IV | Implemented and tested | `connection::safety_code::{Md4, SafetyCodeConfig}` | `test_md4_known_vectors`, `md4_safety_code_matches_din_annex_a_lower_half`, checksum rejection tests |
+| Redundancy CRC options and byte order | Implemented and tested | `redundancy::crc`, `RedundancyCrc` | `din_clause_6_3_6_known_answers_and_lengths`, `writes_check_codes_in_little_endian_wire_order` |
+| Redundant two-channel send/receive and duplicate suppression | Partially implemented; tested locally | `redundancy::channel::RedundancyLayer` | `accepts_non_zero_reserve_and_discards_duplicate_channel_copy`, `reports_send_failure_only_when_both_channels_fail`, two-endpoint test |
+| Redundancy defer queue and `T_seq` expiry | Partially implemented; tested | `redundancy::{channel,defer_queue,sequence}` | defer queue tests, `defers_ahead_frame_then_releases_it_on_t_seq_expiry`, `releases_a_deferred_frame_after_the_missing_frame_arrives` |
+| SRL six-state vocabulary and implemented transitions | Implemented and tested for current transition set | `connection::state_machine::{StateMachine, RastaState}` | `state_machine_all_implemented_transitions_and_rejections` |
+| Complete DIN event/state matrix | Not implemented | N/A | Documented in `docs/state-event-test-matrix.md` as functional work required |
+| Connection establishment | Partially implemented; tested locally | `connection::{connect, handle_packet}` | `test_connection_handshake_start`, `two_endpoint_two_channel_connection_and_data_interoperate` |
+| Data transfer and packetization factor 1 | Partially implemented; tested | `connection::{send_application_data, receive_data}` | `two_endpoint_two_channel_connection_and_data_interoperate`, `test_application_receive_queue` |
+| Flow control (`N_sendmax`, MWA) | Partially implemented; partially tested | `connection::{can_send_data, flush_application_tx}` | `application_tx_queue_is_bounded_when_flow_control_blocks`; full conformance pending |
+| Sequence arithmetic and wraparound | Implemented and tested | `serial`, `connection::sequencing::SequenceHandler` | serial tests, `sequencing_duplicates_gaps_range_and_wraparound_are_classified` |
+| Confirmed sequence handling | Implemented but incompletely tested | `connection::apply_confirmation`, `retransmission::clear_up_to` | retransmission confirmation tests; full connection-level boundary matrix pending |
+| Retransmission request/response/data | Partially implemented; incompletely tested | `connection::{retransmit_from, handle_packet}`, `retransmission::RetransmissionBuffer` | buffer tests; end-to-end loss/recovery remains pending |
+| Timestamp and heartbeat supervision | Partially implemented; tested for helpers and local operation | `time`, `connection::time_supervision`, `connection::heartbeat`, `connection::apply_timeliness` | time tests, heartbeat tests, `time_supervision_preserves_exact_boundaries_and_wraparound`, two-endpoint heartbeat loop |
+| Diagnostics and SRL counters | Partially implemented; tested for implemented triggers | `srl::{DiagnosticEvent, SrlErrorCounters}`, `connection::record_diagnostic` | `bad_safety_code_is_rejected_and_counted_without_closing_connection`, `diagnostics_queue_overflow_is_counted_without_unrelated_counter_changes` |
+| Concrete UDP platform adapter | Implemented and tested locally | `rasta_platform::udp::UdpSocketTransport` | UDP bind/empty receive/loopback tests; external interoperability pending |
+| Standard clock adapter | Implemented and tested structurally | `rasta_platform::std_clock::StdClock` | standard-clock monotonic/protocol timestamp tests |
+| Embedded Ethernet adapter trait | Implemented and tested with fake driver | `rasta_platform::embedded_ethernet` | fake-driver success and error propagation tests |
+| Runnable node CLI and profile wiring | Implemented and tested for parsing/profile; local smoke exercised | `apps/rasta-node/src/main.rs`, `profile.rs` | CLI role/port tests, profile tests, prior local two-node smoke |
+| Per-channel quality/adaptive monitoring | Not implemented | N/A | Planned future work |
+| Independent implementation interoperability | External interoperability pending | N/A | Do not claim; future controlled test campaign required |
 
 ## Required project decisions
 
-The following are deliberately not supplied by this repository: operational
-network identifier, MD4 initial value, timing budget, capacity values, endpoint
-configuration, threat/hazard analysis, acceptance criteria, evidence set, and
-independent assessment. The constants in `src/config.rs` are test-only values.
+Operational network identifiers, MD4 initial values, endpoint addresses,
+timing budgets, capacity values, acceptance criteria, hazard analysis, evidence
+sets, and independent assessment remain project responsibilities. The shipped
+node profile is explicitly academic and non-production.
 
-## Planned verification
+## Verification recommendations
 
-- Complete the event/state matrix with table-driven tests.
-- Add end-to-end retransmission and confirmation boundary tests.
-- Add per-channel diagnostics and tests for channel degradation.
-- Test with an independently implemented peer and recorded, approved test
-  vectors.
-- Establish a project-specific requirements, verification, and safety-case
-  baseline before considering operational use.
+- Complete deterministic end-to-end retransmission loss/recovery tests.
+- Expand connection-level timeout and confirmation boundary tests.
+- Add parser fuzzing in a separate phase if tooling is approved.
+- Perform independent-peer interoperability only after deterministic local
+  coverage and project requirements are stable.

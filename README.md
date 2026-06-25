@@ -1,14 +1,16 @@
+# RaSTA protocol using Rust
 
 ## Project status
 
-This is an academic/development Rust implementation. It provides a fixed-capacity, `no_std`-capable core and a
-two-UDP-channel desktop demonstration. It is useful for learning, development,
-and controlled interoperability experiments.
+This is an academic/development Rust implementation. It provides a
+fixed-capacity, `no_std`-capable core and a two-UDP-channel desktop
+demonstration. It is useful for learning, development, and controlled
+interoperability experiments.
 
-It is **not** production-ready, certified, certification-ready, fully
-DIN-compliant, or proven interoperable with another RaSTA implementation.
-Several requirements remain incomplete; see [Known limitations](#known-limitations)
-and the [traceability notes](docs/din-rasta-03-03-traceability.md).
+It is not production-ready, certified, certification-ready, fully DIN-compliant,
+or proven interoperable with another RaSTA implementation. Several requirements
+remain incomplete; see [Known limitations](#known-limitations) and the
+[traceability notes](docs/din-rasta-03-03-traceability.md).
 
 Production parameters must come from an approved project profile, an
 interface-control specification, and a safety case. The code and its current
@@ -16,40 +18,42 @@ configuration have not been independently assessed or certified.
 
 ## Safety disclaimer
 
-The executable configuration is a test-only interoperability profile. Do not
-reuse its identifiers, timing values, MD4 initial value, or ports as operational
-railway parameters. A deployment needs project-specific parameter management,
-configuration control, verification, validation, and independent assessment.
+The executable configuration is an academic interoperability-test profile. Do
+not reuse its identifiers, timing values, MD4 initial value, or ports as
+operational railway parameters. A deployment needs project-specific parameter
+management, configuration control, verification, validation, and independent
+assessment.
 
 ## Architecture
 
 ```text
 Railway signalling application
         │
-RaSTA service API                 src/application/service_interface.rs
+rasta-node demo app               apps/rasta-node/
         │
-SRL and redundancy logic          src/core/
+Platform adapters                 crates/rasta-platform/
         │
-Platform traits                   src/platform/
-        │
-Desktop / embedded adapters       src/adapters/
+RaSTA protocol core               crates/rasta-core/
 ```
 
-The core uses fixed-size arrays and generic platform traits. The `std`-only
-UDP demo is deliberately outside the `no_std` core.
+`rasta-core` owns the platform-independent protocol implementation and remains
+`#![no_std]`. `rasta-platform` owns concrete adapters such as UDP, standard
+clock, and embedded Ethernet. `apps/rasta-node` owns the runnable UDP demo and
+its non-production profile. The root `rasta_stack` package remains temporarily
+as a compatibility facade.
 
 ## Build
 
-The desktop demonstration requires Rust with the `std` feature:
+Build the desktop demonstration node:
 
 ```bash
-cargo build --release --features std --bin rasta_node
+cargo build -p rasta-node --release
 ```
 
 The binary interface is:
 
 ```text
-rasta_node <A|B> <remote_ip>
+rasta-node <A|B> <remote_ip>
 ```
 
 `A` uses local UDP ports 5000 and 6000 and sends to the peer's 5001 and 6001.
@@ -57,14 +61,14 @@ rasta_node <A|B> <remote_ip>
 
 ## Test
 
-The following commands were run successfully against this repository:
+Useful validation commands:
 
 ```bash
 cargo fmt --all -- --check
-cargo check --all-targets --all-features
-cargo test --all-targets --all-features
-cargo clippy --all-targets --all-features -- -D warnings
-cargo check --no-default-features --lib
+cargo check --workspace --all-targets --all-features
+cargo test --workspace --all-targets --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo check -p rasta-core --no-default-features
 ```
 
 The current suite contains unit and in-memory two-channel tests. It is not a
@@ -76,13 +80,13 @@ interoperability testing.
 Use two terminals. Start B first:
 
 ```bash
-cargo run --release --features std --bin rasta_node -- B 127.0.0.1
+cargo run -p rasta-node --release -- B 127.0.0.1
 ```
 
 Then start A:
 
 ```bash
-cargo run --release --features std --bin rasta_node -- A 127.0.0.1
+cargo run -p rasta-node --release -- A 127.0.0.1
 ```
 
 The demo prints the channel endpoints, reaches `Up`, sends `Hello from A`, and
@@ -94,17 +98,17 @@ Build the same revision on both hosts. Identify the IP address that each host
 actually uses on the VMware network; on multihomed hosts it may differ from a
 Wi-Fi or host-only adapter address.
 
-Start B on Kali/Linux first, replacing the placeholders with the peer's actual
-source address:
+Start B on Kali/Linux first, replacing the placeholder with the Windows source
+address:
 
 ```bash
-cargo run --release --features std --bin rasta_node -- B <windows-source-ip>
+cargo run -p rasta-node --release -- B <windows-source-ip>
 ```
 
 Start A on Windows:
 
 ```powershell
-cargo run --release --features std --bin rasta_node -- A <kali-source-ip>
+cargo run -p rasta-node --release -- A <kali-source-ip>
 ```
 
 Allow inbound UDP 5000 and 6000 on Windows, and inbound UDP 5001 and 6001 on
@@ -124,15 +128,15 @@ channels or endpoint/source-address matching.
 
 ## Configuration
 
-[`src/config.rs`](src/config.rs) defines the clearly labelled
-`DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE`. It is not a production profile.
-The current test configuration uses:
+[apps/rasta-node/src/profile.rs](apps/rasta-node/src/profile.rs) defines the
+clearly labelled `DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE`. It is not a
+production profile. The current test configuration uses:
 
 | Parameter | Test-only value |
 |---|---:|
 | Protocol version | ASCII `0303` |
 | RaSTA network identifier | `1` |
-| MD4 initial value | Non-standard test-only value (defined in source) |
+| MD4 initial value | Non-standard test-only value defined in source |
 | Safety code | Lower 8 bytes of MD4 |
 | Redundancy check code | CRC option B |
 | Channels | 2 |
@@ -163,10 +167,12 @@ parameters.
 ## Repository structure
 
 ```text
-Cargo.toml                         crate configuration
-README.md                          project status and safe-use guidance
-docs/development-guide.md          learning/development guide
+Cargo.toml                            workspace configuration
+README.md                             project status and safe-use guidance
+docs/development-guide.md             learning/development guide
 docs/din-rasta-03-03-traceability.md  implementation-status traceability
-src/                               library and desktop demonstration
+crates/rasta-core/                    platform-independent protocol core
+crates/rasta-platform/                concrete platform adapters
+apps/rasta-node/                      runnable UDP demonstration node
+src/                                  temporary rasta_stack compatibility facade
 ```
-

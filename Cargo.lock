@@ -3,5 +3,28 @@
 version = 4
 
 [[package]]
+name = "rasta-core"
+version = "0.1.0"
+
+[[package]]
+name = "rasta-node"
+version = "0.1.0"
+dependencies = [
+ "rasta-core",
+ "rasta-platform",
+]
+
+[[package]]
+name = "rasta-platform"
+version = "0.1.0"
+dependencies = [
+ "rasta-core",
+]
+
+[[package]]
 name = "rasta_stack"
 version = "0.1.0"
+dependencies = [
+ "rasta-core",
+ "rasta-platform",
+]

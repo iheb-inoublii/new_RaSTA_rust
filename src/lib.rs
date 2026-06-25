@@ -17,18 +17,9 @@ pub mod srl;
 #[deprecated(note = "renamed to adapters; use rasta_stack::adapters instead")]
 pub mod backends {
     pub use crate::adapters::embedded_ethernet as embedded_eth;
-    pub use crate::adapters::test as mock_transport;
 
     #[cfg(feature = "std")]
     pub use crate::adapters::socket_transport as udp_std;
     #[cfg(feature = "std")]
     pub use crate::adapters::standard_clock as std_clock;
-    #[cfg(feature = "std")]
-    pub use crate::adapters::standard_timer as std_timer;
-
-    #[cfg(all(feature = "std", target_os = "linux"))]
-    pub use crate::adapters::linux as tcp_linux;
 }
-
-#[cfg(test)]
-mod tests;
