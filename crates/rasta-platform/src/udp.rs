@@ -61,6 +61,11 @@ mod tests {
     }
 
     #[test]
+    fn invalid_bind_address_fails() {
+        assert!(UdpSocketTransport::new("256.256.256.256:1", "127.0.0.1:9").is_err());
+    }
+
+    #[test]
     fn sends_and_receives_over_loopback() {
         let reserved_receiver = UdpSocket::bind("127.0.0.1:0").expect("reserve receiver");
         let receiver_addr = reserved_receiver.local_addr().expect("receiver address");

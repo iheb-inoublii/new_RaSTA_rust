@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod cases {
     use crate::config::{InteroperabilityProfile, ProfileError, SafetyCodeLength};
-    use crate::connection::pdu::{Packet, PacketType};
+    use crate::connection::pdu::{Packet, PacketError, PacketType};
     use crate::connection::retransmission::RetransmissionBuffer;
-    use crate::connection::safety_code::{Md4, SafetyCodeConfig};
+    use crate::connection::safety_code::{Md4, SafetyCodeConfig, SafetyCodeMode};
     use crate::connection::sequencing::{SequenceHandler, SequenceResult};
     use crate::connection::state_machine::{RastaState, StateMachine};
     use crate::connection::time_supervision::{TimeSupervisionError, TimeSupervisor};
-    use crate::connection::{RastaConfig, RastaConnection};
+    use crate::connection::{ConnectionError, RastaConfig, RastaConnection};
     use crate::port::{RandomError, RandomSource, Transport, TransportError};
     use crate::redundancy::{
         RedundancyCheckCode, RedundancyConfig, RedundancyCrc, RedundancyLayer,
@@ -233,6 +233,44 @@ mod cases {
         }
     }
 
+    fn valid_profile() -> InteroperabilityProfile {
+        InteroperabilityProfile {
+            protocol_version: InteroperabilityProfile::VERSION_03_03,
+            safety_code_length: SafetyCodeLength::Md4Lower8,
+            redundancy_crc: RedundancyCrc::OptionB,
+            channel_count: 2,
+            network_identifier: 0x0000_0001,
+            md4_initial_value: [
+                0x02, 0x23, 0x45, 0x67, 0x98, 0xab, 0xcd, 0xef, 0xff, 0xdc, 0xba, 0x98, 0x77, 0x54,
+                0x32, 0x10,
+            ],
+            t_max_ms: 1_800,
+            t_h_ms: 300,
+            t_seq_ms: 100,
+            n_send_max: 20,
+            mwa: 10,
+            defer_queue_capacity: 4,
+            retransmission_capacity: 20,
+            application_queue_capacity: 20,
+            diagnostic_queue_capacity: 16,
+            max_messages_per_packet: 1,
+        }
+    }
+
+    fn packet(packet_type: PacketType, payload_len: usize) -> Packet {
+        Packet {
+            receiver_id: 1,
+            sender_id: 2,
+            sequence_number: 10,
+            confirmed_sequence_number: 5,
+            timestamp: 1000,
+            confirmed_timestamp: 900,
+            packet_type,
+            payload: [0; 256],
+            payload_len,
+        }
+    }
+
     #[test]
     fn test_packet_serialization() {
         let safety = SafetyCodeConfig::default();
@@ -270,6 +308,102 @@ mod cases {
     }
 
     #[test]
+    fn pdu_message_types_lengths_and_payload_rules_are_enforced() {
+        let safety = SafetyCodeConfig::default();
+        let mut buffer = [0u8; 512];
+
+        for packet_type in [
+            PacketType::ConnectionRequest,
+            PacketType::ConnectionResponse,
+            PacketType::RetransmissionRequest,
+            PacketType::RetransmissionResponse,
+            PacketType::DisconnectionRequest,
+            PacketType::Heartbeat,
+            PacketType::Data,
+            PacketType::RetransmissionData,
+        ] {
+            let mut p = packet(
+                packet_type,
+                match packet_type {
+                    PacketType::ConnectionRequest | PacketType::ConnectionResponse => 14,
+                    PacketType::DisconnectionRequest => 4,
+                    _ => 0,
+                },
+            );
+            if matches!(
+                packet_type,
+                PacketType::ConnectionRequest | PacketType::ConnectionResponse
+            ) {
+                p.payload[0..4].copy_from_slice(b"0303");
+            }
+            let len = p.serialize(&mut buffer, &safety).unwrap();
+            let parsed = Packet::parse(&buffer[..len], &safety).unwrap();
+            assert_eq!(parsed.packet_type, packet_type);
+            assert_eq!(parsed.payload_len, p.payload_len);
+        }
+
+        let mut heartbeat = packet(PacketType::Heartbeat, 0);
+        let exact_len = heartbeat.serialize(&mut buffer, &safety).unwrap();
+        assert!(matches!(
+            Packet::parse(&buffer[..exact_len - 1], &safety),
+            Err(PacketError::BufferTooSmall)
+        ));
+        let mut with_extra = [0u8; 520];
+        with_extra[..exact_len].copy_from_slice(&buffer[..exact_len]);
+        assert!(matches!(
+            Packet::parse(&with_extra[..exact_len + 1], &safety),
+            Err(PacketError::InvalidLength)
+        ));
+
+        with_extra[..exact_len].copy_from_slice(&buffer[..exact_len]);
+        with_extra[0..2].copy_from_slice(&27u16.to_le_bytes());
+        assert!(matches!(
+            Packet::parse(&with_extra[..exact_len], &safety),
+            Err(PacketError::InvalidLength)
+        ));
+
+        with_extra[..exact_len].copy_from_slice(&buffer[..exact_len]);
+        with_extra[2..4].copy_from_slice(&9999u16.to_le_bytes());
+        assert!(matches!(
+            Packet::parse(&with_extra[..exact_len], &safety),
+            Err(PacketError::InvalidType)
+        ));
+
+        heartbeat.payload_len = 1;
+        assert!(matches!(
+            heartbeat.serialize(&mut buffer, &safety),
+            Err(PacketError::InvalidPayload)
+        ));
+    }
+
+    #[test]
+    fn pdu_connection_version_and_max_payload_boundaries_are_enforced() {
+        let safety = SafetyCodeConfig::default();
+        let mut buffer = [0u8; 512];
+        let mut request = packet(PacketType::ConnectionRequest, 14);
+        request.payload[0..4].copy_from_slice(b"0301");
+        assert!(matches!(
+            request.serialize(&mut buffer, &safety),
+            Err(PacketError::UnsupportedProtocolVersion)
+        ));
+
+        let mut data = packet(PacketType::Data, Packet::MAX_PAYLOAD_SIZE);
+        for (index, byte) in data.payload.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+        let len = data.serialize(&mut buffer, &safety).unwrap();
+        let parsed = Packet::parse(&buffer[..len], &safety).unwrap();
+        assert_eq!(parsed.payload_len, Packet::MAX_PAYLOAD_SIZE);
+        assert_eq!(parsed.payload, data.payload);
+
+        data.payload_len = Packet::MAX_PAYLOAD_SIZE + 1;
+        assert!(matches!(
+            data.serialize(&mut buffer, &safety),
+            Err(PacketError::InvalidLength)
+        ));
+    }
+
+    #[test]
     fn test_state_machine_transitions() {
         let mut sm = StateMachine::new();
         assert_eq!(sm.current_state, RastaState::Closed);
@@ -283,6 +417,49 @@ mod cases {
         let mut sm2 = StateMachine::new();
         assert!(!sm2.transition(RastaState::Up));
         assert_eq!(sm2.current_state, RastaState::Closed);
+    }
+
+    #[test]
+    fn state_machine_all_implemented_transitions_and_rejections() {
+        let states = [
+            RastaState::Closed,
+            RastaState::Down,
+            RastaState::Start,
+            RastaState::Up,
+            RastaState::RetransmissionRequested,
+            RastaState::RetransmissionRunning,
+        ];
+        let legal = [
+            (RastaState::Closed, RastaState::Down),
+            (RastaState::Down, RastaState::Start),
+            (RastaState::Down, RastaState::Closed),
+            (RastaState::Start, RastaState::Up),
+            (RastaState::Start, RastaState::Closed),
+            (RastaState::Up, RastaState::RetransmissionRequested),
+            (RastaState::Up, RastaState::Closed),
+            (
+                RastaState::RetransmissionRequested,
+                RastaState::RetransmissionRunning,
+            ),
+            (RastaState::RetransmissionRequested, RastaState::Closed),
+            (
+                RastaState::RetransmissionRunning,
+                RastaState::RetransmissionRequested,
+            ),
+            (RastaState::RetransmissionRunning, RastaState::Up),
+            (RastaState::RetransmissionRunning, RastaState::Closed),
+        ];
+
+        for &from in &states {
+            for &to in &states {
+                let mut sm = StateMachine {
+                    current_state: from,
+                };
+                let expected = from == to || legal.contains(&(from, to));
+                assert_eq!(sm.transition(to), expected, "{from:?} -> {to:?}");
+                assert_eq!(sm.current_state, if expected { to } else { from });
+            }
+        }
     }
 
     #[test]
@@ -300,6 +477,26 @@ mod cases {
             SequenceResult::Gap(expected) => assert_eq!(expected, 2),
             _ => panic!("Expected Gap"),
         }
+    }
+
+    #[test]
+    fn sequencing_duplicates_gaps_range_and_wraparound_are_classified() {
+        let mut sh = SequenceHandler::with_initial_tx(u32::MAX);
+        assert_eq!(sh.next_tx(), u32::MAX);
+        assert_eq!(sh.next_tx(), 0);
+        assert_eq!(sh.next_tx_value(), 1);
+
+        sh.accept_initial_rx(u32::MAX - 1);
+        assert_eq!(sh.expected_rx(), u32::MAX);
+        assert_eq!(sh.validate_rx(u32::MAX), SequenceResult::Ok);
+        // Existing behavior: once current_rx wraps to zero, confirmed_seq()
+        // returns its zero sentinel rather than u32::MAX.
+        assert_eq!(sh.confirmed_seq(), 0);
+        assert_eq!(sh.last_received_seq(), None);
+        assert_eq!(sh.validate_rx(u32::MAX), SequenceResult::Duplicate);
+        assert_eq!(sh.validate_rx(2), SequenceResult::Gap(0));
+        assert!(sh.validate_range(10, 2));
+        assert!(!sh.validate_range(21, 2));
     }
 
     #[test]
@@ -392,6 +589,35 @@ mod cases {
         assert_eq!(retrieved.sequence_number, 100);
 
         rb.clear_up_to(100);
+        assert_eq!(rb.count(), 0);
+    }
+
+    #[test]
+    fn retransmission_capacity_confirmation_and_wraparound_are_deterministic() {
+        let mut rb = RetransmissionBuffer::with_capacity(2);
+        let mut first = packet(PacketType::Data, 3);
+        first.sequence_number = u32::MAX - 1;
+        first.payload[..3].copy_from_slice(b"one");
+        let mut second = packet(PacketType::Data, 3);
+        second.sequence_number = u32::MAX;
+        second.payload[..3].copy_from_slice(b"two");
+        let mut third = packet(PacketType::Data, 5);
+        third.sequence_number = 0;
+        third.payload[..5].copy_from_slice(b"three");
+
+        assert!(rb.store(first.clone()));
+        assert!(rb.store(second.clone()));
+        assert!(!rb.store(third));
+        assert_eq!(rb.count(), 2);
+        assert_eq!(&rb.get_packet(u32::MAX - 1).unwrap().payload[..3], b"one");
+        assert_eq!(&rb.get_packet(u32::MAX).unwrap().payload[..3], b"two");
+
+        rb.clear_up_to(u32::MAX - 1);
+        assert_eq!(rb.count(), 1);
+        assert!(rb.get_packet(u32::MAX - 1).is_none());
+        assert!(rb.get_packet(u32::MAX).is_some());
+
+        rb.clear_up_to(u32::MAX);
         assert_eq!(rb.count(), 0);
     }
 
@@ -544,6 +770,54 @@ mod cases {
     }
 
     #[test]
+    fn diagnostics_queue_overflow_is_counted_without_unrelated_counter_changes() {
+        let mut connection = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            MockClock { time: 0 },
+            config(1, 2),
+        )
+        .unwrap();
+        connection.transition(RastaState::Down).unwrap();
+        connection.transition(RastaState::Start).unwrap();
+        connection.transition(RastaState::Up).unwrap();
+
+        let bad_packet = packet(PacketType::Heartbeat, 0);
+        let mut srl = [0u8; 512];
+        let length = bad_packet
+            .serialize(&mut srl, &SafetyCodeConfig::default())
+            .unwrap();
+        srl[length - 1] ^= 0xff;
+        let total =
+            length + RedundancyLayer::<SimpleMockTransport, SimpleMockTransport>::HEADER_SIZE;
+        let mut rl = [0u8; 520];
+        rl[..2].copy_from_slice(&(total as u16).to_le_bytes());
+        rl[4..8].copy_from_slice(&0u32.to_le_bytes());
+        rl[8..total].copy_from_slice(&srl[..length]);
+
+        for _ in 0..20 {
+            connection.redundancy = RedundancyLayer::with_config(
+                SimpleMockTransport::with_receive(&rl[..total]),
+                SimpleMockTransport::empty(),
+                RedundancyConfig {
+                    check_code: RedundancyCheckCode::None,
+                    t_seq_ms: 100,
+                },
+            );
+            assert!(connection.process().is_ok());
+        }
+
+        assert_eq!(connection.error_counters().safety, 20);
+        assert_eq!(connection.error_counters().message_type, 0);
+        assert!(connection.diagnostic_overflow_count() > 0);
+        let mut taken = 0;
+        while connection.take_diagnostic().is_some() {
+            taken += 1;
+        }
+        assert_eq!(taken, 16);
+    }
+
+    #[test]
     fn test_insecure_configuration_is_rejected() {
         let clock = MockClock { time: 0 };
         let mut insecure = config(1, 2);
@@ -561,6 +835,101 @@ mod cases {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn connection_configuration_rejects_each_invalid_rule_independently() {
+        let base = config(1, 2);
+        let cases: [fn(&mut RastaConfig); 12] = [
+            |c| c.sender_id = 0,
+            |c| c.remote_id = 0,
+            |c| c.remote_id = c.sender_id,
+            |c| c.t_max = 0,
+            |c| c.t_max = 0x8000_0000,
+            |c| c.heartbeat_interval_ms = 0,
+            |c| c.heartbeat_interval_ms = 0x8000_0000,
+            |c| c.n_send_max = 0,
+            |c| c.n_send_max = 21,
+            |c| c.mwa = 0,
+            |c| c.mwa = c.n_send_max,
+            |c| c.redundancy.t_seq_ms = 0,
+        ];
+
+        for mutate in cases {
+            let mut invalid = base;
+            mutate(&mut invalid);
+            assert!(matches!(
+                RastaConnection::try_new(
+                    SimpleMockTransport::empty(),
+                    SimpleMockTransport::empty(),
+                    MockClock { time: 0 },
+                    invalid,
+                ),
+                Err(ConnectionError::InvalidConfiguration)
+            ));
+        }
+
+        let mut invalid = base;
+        invalid.safety_code = SafetyCodeConfig {
+            mode: SafetyCodeMode::None,
+            md4_initial_value: SafetyCodeConfig::STANDARD_MD4_INITIAL_VALUE,
+        };
+        assert!(matches!(
+            RastaConnection::try_new(
+                SimpleMockTransport::empty(),
+                SimpleMockTransport::empty(),
+                MockClock { time: 0 },
+                invalid,
+            ),
+            Err(ConnectionError::InvalidConfiguration)
+        ));
+    }
+
+    #[test]
+    fn interoperability_profile_validation_reports_each_typed_error() {
+        let base = valid_profile();
+        type ProfileMutation = fn(&mut InteroperabilityProfile);
+        let cases: [(ProfileMutation, ProfileError); 11] = [
+            (
+                |p| p.protocol_version = *b"0301",
+                ProfileError::UnsupportedProtocolVersion,
+            ),
+            (|p| p.channel_count = 1, ProfileError::InvalidChannelCount),
+            (|p| p.mwa = 0, ProfileError::InvalidFlowControl),
+            (|p| p.mwa = p.n_send_max, ProfileError::InvalidFlowControl),
+            (
+                |p| p.retransmission_capacity = p.n_send_max - 1,
+                ProfileError::InvalidCapacity,
+            ),
+            (
+                |p| p.defer_queue_capacity = 3,
+                ProfileError::InvalidCapacity,
+            ),
+            (|p| p.t_h_ms = 0, ProfileError::InvalidTiming),
+            (|p| p.t_max_ms = p.t_h_ms, ProfileError::InvalidTiming),
+            (
+                |p| p.max_messages_per_packet = 2,
+                ProfileError::InvalidPacketization,
+            ),
+            (
+                |p| p.network_identifier = 0,
+                ProfileError::InvalidNetworkIdentifier,
+            ),
+            (
+                |p| p.md4_initial_value = [0; 16],
+                ProfileError::UnsafeMd4InitialValue,
+            ),
+        ];
+
+        for (mutate, expected) in cases {
+            let mut invalid = base;
+            mutate(&mut invalid);
+            assert_eq!(invalid.validate(), Err(expected));
+        }
+
+        let mut invalid = base;
+        invalid.md4_initial_value = InteroperabilityProfile::RFC_MD4_INITIAL_VALUE;
+        assert_eq!(invalid.validate(), Err(ProfileError::UnsafeMd4InitialValue));
     }
 
     #[test]

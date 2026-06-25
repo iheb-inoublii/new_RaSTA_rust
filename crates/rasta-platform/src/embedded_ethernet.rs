@@ -79,4 +79,23 @@ mod tests {
         let len = adapter.receive(&mut output).unwrap();
         assert_eq!(&output[..len], b"pong");
     }
+
+    #[test]
+    fn propagates_driver_errors_and_empty_receive() {
+        let mut adapter = EmbeddedEthernetAdapter::new(FakeDriver::default());
+        let mut output = [0u8; 8];
+        assert_eq!(adapter.receive(&mut output).unwrap(), 0);
+
+        let too_large = [0u8; 17];
+        assert_eq!(
+            adapter.send(&too_large),
+            Err(TransportError::BufferTooSmall)
+        );
+
+        adapter.driver_mut().rx_len = 9;
+        assert_eq!(
+            adapter.receive(&mut output),
+            Err(TransportError::BufferTooSmall)
+        );
+    }
 }
