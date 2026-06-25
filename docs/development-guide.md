@@ -49,7 +49,6 @@ rasta_stack/
     platform/
       clock.rs
       logger.rs
-      synchronization.rs
       timer.rs
       transport.rs
     adapters/
@@ -261,31 +260,7 @@ Design rules:
 - Keep logging optional.
 - The core should not require a logger to function.
 
-### 4.5 Synchronization Interface
-
-File: `src/platform/synchronization.rs`
-
-Purpose:
-
-Represents OS primitives or critical sections without tying the core to threads,
-mutexes, or RTOS locks.
-
-Implement:
-
-```rust
-pub trait CriticalSection {
-    fn enter(&mut self);
-    fn exit(&mut self);
-}
-```
-
-Design rules:
-
-- Do not use `std::sync` here.
-- Desktop adapters may map this to a mutex.
-- Embedded adapters may map this to interrupt masking or RTOS primitives.
-
-### 4.6 Platform Module File
+### 4.5 Platform Module File
 
 File: `src/platform.rs`
 
@@ -294,7 +269,6 @@ Expose the platform traits:
 ```rust
 pub mod clock;
 pub mod logger;
-pub mod synchronization;
 pub mod timer;
 pub mod transport;
 ```

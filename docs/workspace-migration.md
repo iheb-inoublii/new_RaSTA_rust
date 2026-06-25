@@ -38,3 +38,10 @@ deadlines. `platform::clock::Clock` is a compatibility alias for that canonical
 trait. `platform::timer::Timer` and `adapters::standard_timer::StdTimer` remain
 temporary compatibility scaffolding only; active protocol logic no longer uses
 them and they are planned for removal in a later migration step.
+
+## Concurrency boundary
+
+The protocol core does not own synchronization primitives. A connection
+instance requires exclusive mutable access while being processed. If an
+integration shares it across threads or tasks, the integration layer is
+responsible for providing the appropriate synchronization mechanism.
