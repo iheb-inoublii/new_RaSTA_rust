@@ -29,6 +29,3 @@ pub mod backends {
     #[cfg(all(feature = "std", target_os = "linux"))]
     pub use crate::adapters::linux as tcp_linux;
 }
-
-#[cfg(test)]
-mod tests;

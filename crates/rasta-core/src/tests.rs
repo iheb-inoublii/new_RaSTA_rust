@@ -3,22 +3,18 @@ mod cases {
     use crate::config::{
         DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, InteroperabilityProfile, ProfileError,
     };
-    use crate::core::connection::{RastaConfig, RastaConnection};
-    use crate::core::connection_state_machine::{RastaState, StateMachine};
-    use crate::core::pdu::{Packet, PacketType};
-    use crate::core::redundancy_management::{
-        RedundancyCheckCode, RedundancyConfig, RedundancyLayer,
-    };
-    use crate::core::retransmission::RetransmissionBuffer;
-    use crate::core::safety_code::{Md4, SafetyCodeConfig};
-    use crate::core::sequencing::{SequenceHandler, SequenceResult};
-    use crate::core::time_supervision::{TimeSupervisionError, TimeSupervisor};
-    use crate::platform::clock::Clock;
-    use crate::platform::random::{RandomError, RandomSource};
-    use crate::platform::transport::{Transport, TransportError};
+    use crate::connection::pdu::{Packet, PacketType};
+    use crate::connection::retransmission::RetransmissionBuffer;
+    use crate::connection::safety_code::{Md4, SafetyCodeConfig};
+    use crate::connection::sequencing::{SequenceHandler, SequenceResult};
+    use crate::connection::state_machine::{RastaState, StateMachine};
+    use crate::connection::time_supervision::{TimeSupervisionError, TimeSupervisor};
+    use crate::connection::{RastaConfig, RastaConnection};
+    use crate::port::{RandomError, RandomSource, Transport, TransportError};
+    use crate::redundancy::{RedundancyCheckCode, RedundancyConfig, RedundancyLayer};
     use crate::srl::{DisconnectReason, SrlState};
-    use rasta_core::time::{
-        DurationMs, MonotonicInstant, ProtocolTimestamp, ProtocolTimestampSource,
+    use crate::time::{
+        DurationMs, MonotonicClock, MonotonicInstant, ProtocolTimestamp, ProtocolTimestampSource,
     };
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
@@ -26,7 +22,7 @@ mod cases {
     struct MockClock {
         time: u32,
     }
-    impl Clock for MockClock {
+    impl MonotonicClock for MockClock {
         fn now(&self) -> MonotonicInstant {
             MonotonicInstant::from_wrapping_millis(self.time)
         }
@@ -183,7 +179,7 @@ mod cases {
     #[derive(Clone)]
     struct SharedClock(Rc<Cell<u32>>);
 
-    impl Clock for SharedClock {
+    impl MonotonicClock for SharedClock {
         fn now(&self) -> MonotonicInstant {
             MonotonicInstant::from_wrapping_millis(self.0.get())
         }
@@ -211,7 +207,7 @@ mod cases {
         }
     }
 
-    impl Clock for FakeClock {
+    impl MonotonicClock for FakeClock {
         fn now(&self) -> MonotonicInstant {
             MonotonicInstant::from_wrapping_millis(self.0.get())
         }
@@ -448,7 +444,7 @@ mod cases {
         }
         assert!(matches!(
             connection.send_application_data(b"x"),
-            Err(crate::core::connection::ConnectionError::TransmitQueueFull)
+            Err(crate::connection::ConnectionError::TransmitQueueFull)
         ));
     }
 

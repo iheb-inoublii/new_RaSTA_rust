@@ -2,22 +2,25 @@
 
 ## Temporary state
 
-This repository now has a Cargo workspace skeleton. The original root package,
-`rasta_stack`, remains in place and continues to own the existing protocol
-implementation, public API, tests, and `rasta_node` demonstration binary.
+This repository now has a Cargo workspace skeleton. The platform-independent
+RaSTA protocol implementation is canonical in `rasta-core`: configuration, SRL
+types, service facade, connection handling, PDU encode/decode, safety code,
+sequencing, retransmission, heartbeat, time supervision, fixed queues, packet
+I/O, serial arithmetic, port traits, and redundancy.
 
-The new packages are placeholders only. No protocol source code, packet format,
-CRC, safety code, timing behavior, sequence handling, or test behavior has
-changed in this phase.
+The original root package, `rasta_stack`, remains in place as a temporary
+compatibility facade. Its protocol module paths forward to `rasta-core` while
+the concrete adapters and current demonstration binary remain in the root
+package for now.
 
 ## Target dependency direction
 
 ```text
-apps/rasta-node
-       ↓
-crates/rasta-platform
-       ↓
-crates/rasta-core
+rasta-node
+    ↓
+rasta-platform
+    ↓
+rasta-core
 ```
 
 `rasta-core` must never depend on `rasta-platform` or `rasta-node`.
@@ -31,9 +34,16 @@ crates/rasta-core
 5. Move the runnable node to `apps/rasta-node`.
 6. Remove temporary compatibility modules after import migration.
 
+## Protocol state names
+
+`connection::state_machine::RastaState` drives the active connection state
+machine. `srl::SrlState` is retained as an SRL-facing public type for
+compatibility; it is not used internally to protect or advance connection
+state.
+
 ## Time compatibility
 
-The active root connection uses `rasta_core::time::MonotonicClock` and typed
+The active connection uses `rasta_core::time::MonotonicClock` and typed
 deadlines. `platform::clock::Clock` is a compatibility alias for that canonical
 trait. `platform::timer::Timer` and `adapters::standard_timer::StdTimer` remain
 temporary compatibility scaffolding only; active protocol logic no longer uses
