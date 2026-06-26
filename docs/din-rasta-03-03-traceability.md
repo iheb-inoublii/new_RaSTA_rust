@@ -24,7 +24,7 @@ Clause references identify engineering areas only and do not reproduce DIN text.
 | PDU wire layout, type values, payload rules | Implemented and tested | `connection::pdu::{Packet, PacketType}` | `test_packet_serialization`, `pdu_message_types_lengths_and_payload_rules_are_enforced`, `pdu_connection_version_and_max_payload_boundaries_are_enforced`, `pdu_parser_does_not_panic_on_malformed_input` |
 | Safety code using MD4 and configured IV | Implemented and tested | `connection::safety_code::{Md4, SafetyCodeConfig}` | `test_md4_known_vectors`, `md4_safety_code_matches_din_annex_a_lower_half`, checksum rejection tests |
 | Redundancy CRC options and byte order | Implemented and tested | `redundancy::crc`, `RedundancyCrc` | `din_clause_6_3_6_known_answers_and_lengths`, `writes_check_codes_in_little_endian_wire_order` |
-| Redundant two-channel send/receive and duplicate suppression | Partially implemented; tested locally | `redundancy::channel::RedundancyLayer` | `accepts_non_zero_reserve_and_discards_duplicate_channel_copy`, `reports_send_failure_only_when_both_channels_fail`, two-endpoint test |
+| Redundant two-channel send/receive, duplicate suppression, and channel monitoring | Implemented and tested for current local behavior; adaptive policy remains conservative | `redundancy::channel::{RedundancyLayer,ChannelId,ChannelStatus}`, connection channel diagnostics | duplicate/channel status tests, one-channel send/receive failure tests, timeout/recovery tests, CRC/malformed-one-channel tests, two-endpoint test |
 | Redundancy defer queue and `T_seq` expiry | Partially implemented; tested | `redundancy::{channel,defer_queue,sequence}` | defer queue tests, `defers_ahead_frame_then_releases_it_on_t_seq_expiry`, `releases_a_deferred_frame_after_the_missing_frame_arrives` |
 | SRL six-state vocabulary and implemented transitions | Implemented and tested for current transition set | `connection::state_machine::{StateMachine, RastaState}` | `state_machine_all_implemented_transitions_and_rejections` |
 | Complete DIN event/state matrix | Not implemented | N/A | Documented in `docs/state-event-test-matrix.md` as functional work required |
@@ -40,7 +40,7 @@ Clause references identify engineering areas only and do not reproduce DIN text.
 | Standard clock adapter | Implemented and tested structurally | `rasta_platform::std_clock::StdClock` | standard-clock monotonic/protocol timestamp tests |
 | Embedded Ethernet adapter trait | Implemented and tested with fake driver | `rasta_platform::embedded_ethernet` | fake-driver success and error propagation tests |
 | Runnable node CLI and profile wiring | Implemented and tested for parsing/profile; local smoke exercised | `apps/rasta-node/src/main.rs`, `profile.rs` | CLI role/port tests, profile tests, prior local two-node smoke |
-| Per-channel quality/adaptive monitoring | Not implemented | N/A | Planned future work |
+| Advanced per-channel quality/adaptive monitoring | Partially implemented | `redundancy::channel` | Minimal deterministic per-channel status, counters, timeout, and recovery are tested; statistical scoring/dynamic tuning remains project-specific |
 | Independent implementation interoperability | External interoperability pending | N/A | Do not claim; future controlled test campaign required |
 
 ## Required project decisions

@@ -10,7 +10,7 @@ mod cases {
     use crate::connection::{ConnectionError, RastaConfig, RastaConnection};
     use crate::port::{RandomError, RandomSource, Transport, TransportError};
     use crate::redundancy::{
-        RedundancyCheckCode, RedundancyConfig, RedundancyCrc, RedundancyLayer,
+        ChannelStatus, RedundancyCheckCode, RedundancyConfig, RedundancyCrc, RedundancyLayer,
     };
     use crate::srl::{DiagnosticEvent, DiagnosticKind, DisconnectReason, SrlState};
     use crate::time::{
@@ -1170,6 +1170,31 @@ mod cases {
     }
 
     #[test]
+    fn single_redundancy_channel_send_failure_is_diagnostic_but_connection_continues() {
+        let mut connection = RastaConnection::try_new(
+            FailingTransport,
+            SimpleMockTransport::empty(),
+            MockClock { time: 0 },
+            config(1, 2),
+        )
+        .unwrap();
+        connection.transition(RastaState::Down).unwrap();
+        connection.transition(RastaState::Start).unwrap();
+        connection.transition(RastaState::Up).unwrap();
+
+        connection.send_application_data(b"x").unwrap();
+        assert_eq!(
+            connection.channel_statuses(),
+            [ChannelStatus::Degraded, ChannelStatus::Healthy]
+        );
+        assert_eq!(
+            connection.take_diagnostic().map(|event| event.kind),
+            Some(DiagnosticKind::ChannelSupervisionFailure)
+        );
+        assert_eq!(connection.state_machine.current_state, RastaState::Up);
+    }
+
+    #[test]
     fn two_endpoint_two_channel_connection_and_data_interoperate() {
         let network = Rc::new(RefCell::new(TestNetwork::new()));
         let time = Rc::new(Cell::new(0));
@@ -1342,13 +1367,19 @@ mod cases {
             Err(ConnectionError::SafetyTimeout)
         ));
         assert_eq!(client.state_machine.current_state, RastaState::Closed);
-        assert_eq!(
-            client.take_diagnostic(),
-            Some(DiagnosticEvent {
-                kind: DiagnosticKind::ConnectionTimeout,
-                value: 2_000,
-            })
-        );
+        let mut saw_timeout = false;
+        for _ in 0..4 {
+            if client.take_diagnostic()
+                == Some(DiagnosticEvent {
+                    kind: DiagnosticKind::ConnectionTimeout,
+                    value: 2_000,
+                })
+            {
+                saw_timeout = true;
+                break;
+            }
+        }
+        assert!(saw_timeout);
 
         let mut disconnect_bytes = [0u8; 512];
         let disconnect_len = network

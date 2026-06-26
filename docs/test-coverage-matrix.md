@@ -37,7 +37,7 @@ Baseline before this phase:
 | `connection/safety_code.rs` | `Md4`, `SafetyCodeConfig` | MD4 vectors, DIN lower-half answer | PDU checksum tests | Covered | Covered | N/A | Covered | No alternate algorithm; MD4 behavior intentionally preserved. |
 | `connection/heartbeat.rs` | `HeartbeatHandler` | heartbeat restart/stop/wrap test | connection heartbeat loop | Covered | Covered | Covered | Covered | None for current helper. |
 | `connection/time_supervision.rs` | `TimeSupervisor` | exact boundary tests, timestamp classifier tests | connection timeliness tests | Covered | Covered | Covered | Covered for current behavior | Remote timestamp, confirmed timestamp, exact `T_max`, and wraparound paths are covered. |
-| `redundancy/channel.rs` | `RedundancyLayer` | channel tests | two-endpoint test | Covered | Covered | Covered | Partially covered | Per-channel quality monitoring not implemented. |
+| `redundancy/channel.rs` | `RedundancyLayer`, `ChannelId`, `ChannelStatus` | channel status, send/receive failure, duplicate, CRC/malformed, timeout/recovery tests | two-endpoint test, connection channel diagnostic test | Covered | Covered | Covered | Covered for current conservative monitoring | Advanced statistical/adaptive scoring remains project-specific. |
 | `redundancy/frame.rs` | frame encode/decode | frame tests | channel tests | Covered | Covered | Boundary malformed lengths covered | Covered | None for current frame format. |
 | `redundancy/sequence.rs` | redundancy sequence classifier | sequence tests | channel tests | Covered | Covered | Covered | Covered | None for current behavior. |
 | `redundancy/defer_queue.rs` | fixed defer queue | defer queue tests | channel tests | Covered | Covered | Covered | Covered | None for current behavior. |

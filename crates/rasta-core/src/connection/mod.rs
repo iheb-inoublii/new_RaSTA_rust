@@ -18,7 +18,7 @@ use crate::connection::time_supervision::{
     ConfirmedTimestampDecision, TimeSupervisionError, TimeSupervisor,
 };
 use crate::port::{RandomError, RandomSource, Transport, TransportError};
-use crate::redundancy::RedundancyLayer;
+use crate::redundancy::{ChannelStatus, RedundancyLayer};
 use crate::serial;
 use crate::srl::DisconnectReason;
 use crate::time::{
@@ -89,6 +89,7 @@ pub struct RastaConnection<
     diagnostics: FixedQueue<DiagnosticEvent, 16>,
     diagnostic_overflow_count: u32,
     error_counters: SrlErrorCounters,
+    last_channel_statuses: [ChannelStatus; 2],
 }
 
 impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
@@ -162,6 +163,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             diagnostics: FixedQueue::new(),
             diagnostic_overflow_count: 0,
             error_counters: SrlErrorCounters::default(),
+            last_channel_statuses: [ChannelStatus::Unknown; 2],
         })
     }
 
@@ -254,10 +256,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         }
 
         for _ in 0..32 {
-            let bytes_read = self
-                .redundancy
-                .receive_at(&mut self.rx_buffer, local_now)
-                .map_err(ConnectionError::Transport)?;
+            let receive_result = self.redundancy.receive_at(&mut self.rx_buffer, local_now);
+            self.record_channel_status_transitions();
+            let bytes_read = receive_result.map_err(ConnectionError::Transport)?;
             if bytes_read == 0 {
                 break;
             }
@@ -529,9 +530,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             .tx_buffer
             .get(..size)
             .ok_or(ConnectionError::BufferFull)?;
-        self.redundancy
-            .send(tx_slice)
-            .map_err(ConnectionError::Transport)?;
+        let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
+        self.record_channel_status_transitions();
+        send_result.map_err(ConnectionError::Transport)?;
         self.last_tx_sequence = Some(packet.sequence_number);
 
         if p_type == PacketType::Data && !self.retransmission.store(packet) {
@@ -579,9 +580,10 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             .tx_buffer
             .get(..size)
             .ok_or(ConnectionError::BufferFull)?;
-        self.redundancy
-            .send(tx_slice)
-            .map_err(ConnectionError::Transport)
+        let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
+        self.record_channel_status_transitions();
+        send_result.map_err(ConnectionError::Transport)?;
+        Ok(())
     }
 
     fn send_packet_with_fields(
@@ -620,9 +622,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             .tx_buffer
             .get(..size)
             .ok_or(ConnectionError::BufferFull)?;
-        self.redundancy
-            .send(tx_slice)
-            .map_err(ConnectionError::Transport)?;
+        let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
+        self.record_channel_status_transitions();
+        send_result.map_err(ConnectionError::Transport)?;
         if update_last_tx {
             self.last_tx_sequence = Some(sequence_number);
         }
@@ -840,6 +842,22 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
 
     pub fn error_counters(&self) -> SrlErrorCounters {
         self.error_counters
+    }
+
+    pub fn channel_statuses(&self) -> [ChannelStatus; 2] {
+        self.redundancy.channel_statuses()
+    }
+
+    fn record_channel_status_transitions(&mut self) {
+        let statuses = self.redundancy.channel_statuses();
+        for (index, status) in statuses.iter().enumerate() {
+            if *status != self.last_channel_statuses[index] {
+                if matches!(status, ChannelStatus::Degraded | ChannelStatus::Failed) {
+                    self.record_diagnostic(DiagnosticKind::ChannelSupervisionFailure, index as u32);
+                }
+                self.last_channel_statuses[index] = *status;
+            }
+        }
     }
 
     fn record_diagnostic(&mut self, kind: DiagnosticKind, value: u32) {
