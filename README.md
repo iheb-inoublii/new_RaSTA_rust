@@ -126,6 +126,23 @@ You can also inspect listeners with `ss -lunp` on Linux or `netstat -ano -p udp`
 on Windows. Ping proves only IP routing; it does not prove both required UDP
 channels or endpoint/source-address matching.
 
+## Controlled interoperability testing
+
+Preparation material for testing against an independent C or C++ RaSTA
+implementation lives under [interop/](interop/):
+
+- [interop/README.md](interop/README.md)
+- [interop/test-plan.md](interop/test-plan.md)
+- [interop/profile-comparison.md](interop/profile-comparison.md)
+- [interop/packet-capture.md](interop/packet-capture.md)
+
+The node supports an optional `--trace-wire` flag and explicit interop address,
+port, and node-ID overrides while preserving the original
+`rasta-node <A|B> <remote_ip>` syntax. Two instances of this Rust
+implementation are not independent interoperability evidence. Do not claim
+external interoperability until a separate implementation has passed a recorded
+test campaign.
+
 ## Configuration
 
 [apps/rasta-node/src/profile.rs](apps/rasta-node/src/profile.rs) defines the
