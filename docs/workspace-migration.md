@@ -61,3 +61,12 @@ The protocol core does not own synchronization primitives. A connection
 instance requires exclusive mutable access while being processed. If an
 integration shares it across threads or tasks, the integration layer is
 responsible for providing the appropriate synchronization mechanism.
+
+## Redundancy channel monitoring
+
+`rasta-core::redundancy` owns the fixed two-channel monitoring model. Channel
+identity is represented as `Channel0`/`Channel1`, status is exposed as a fixed
+snapshot, and monitoring uses monotonic time plus the configured redundancy
+`t_seq_ms` as the academic non-production observation window. Platform adapters
+only send and receive bytes; channel-health policy does not live in
+`rasta-platform`.

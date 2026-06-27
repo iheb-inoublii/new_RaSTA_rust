@@ -14,8 +14,11 @@ use crate::connection::retransmission::RetransmissionBuffer;
 use crate::connection::safety_code::SafetyCodeConfig;
 use crate::connection::sequencing::{SequenceHandler, SequenceResult};
 use crate::connection::state_machine::{RastaState, StateMachine};
+use crate::connection::time_supervision::{
+    ConfirmedTimestampDecision, TimeSupervisionError, TimeSupervisor,
+};
 use crate::port::{RandomError, RandomSource, Transport, TransportError};
-use crate::redundancy::RedundancyLayer;
+use crate::redundancy::{ChannelStatus, RedundancyLayer};
 use crate::serial;
 use crate::srl::DisconnectReason;
 use crate::time::{
@@ -64,6 +67,7 @@ pub struct RastaConnection<
     pub n_send_max: u16,
     pub mwa: u16,
     remote_n_send_max: u16,
+    initial_tx_sequence: u32,
     last_tx_sequence: Option<u32>,
     last_confirmed_by_peer: Option<u32>,
     received_since_ack: u16,
@@ -85,6 +89,7 @@ pub struct RastaConnection<
     diagnostics: FixedQueue<DiagnosticEvent, 16>,
     diagnostic_overflow_count: u32,
     error_counters: SrlErrorCounters,
+    last_channel_statuses: [ChannelStatus; 2],
 }
 
 impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
@@ -136,6 +141,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             n_send_max: config.n_send_max,
             mwa: config.mwa,
             remote_n_send_max: config.n_send_max,
+            initial_tx_sequence: config.initial_seq,
             last_tx_sequence: None,
             last_confirmed_by_peer: None,
             received_since_ack: 0,
@@ -157,6 +163,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             diagnostics: FixedQueue::new(),
             diagnostic_overflow_count: 0,
             error_counters: SrlErrorCounters::default(),
+            last_channel_statuses: [ChannelStatus::Unknown; 2],
         })
     }
 
@@ -206,6 +213,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             self.send_disconnect(DisconnectReason::UserRequest)?;
             self.transition(RastaState::Closed)?;
             self.stop_timeliness_monitor();
+            self.heartbeat.stop();
         }
         Ok(())
     }
@@ -219,6 +227,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         if self.state_machine.current_state != RastaState::Closed {
             self.transition(RastaState::Closed)?;
             self.stop_timeliness_monitor();
+            self.heartbeat.stop();
         }
         send_result
     }
@@ -233,7 +242,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                 DiagnosticKind::ConnectionTimeout,
                 local_now.wrapping_millis(),
             );
-            self.disconnect_with_error()?;
+            self.disconnect_with_reason(DisconnectReason::IncomingMessageTimeout)?;
             return Err(ConnectionError::SafetyTimeout);
         }
         if self.heartbeat.is_due(local_now) {
@@ -247,10 +256,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         }
 
         for _ in 0..32 {
-            let bytes_read = self
-                .redundancy
-                .receive_at(&mut self.rx_buffer, local_now)
-                .map_err(ConnectionError::Transport)?;
+            let receive_result = self.redundancy.receive_at(&mut self.rx_buffer, local_now);
+            self.record_channel_status_transitions();
+            let bytes_read = receive_result.map_err(ConnectionError::Transport)?;
             if bytes_read == 0 {
                 break;
             }
@@ -310,6 +318,8 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         }
 
         let local_now = self.clock.now();
+        let timeliness_decision = self.validate_timeliness(&packet)?;
+        let peer_confirmation = self.validate_peer_confirmation(&packet)?;
 
         match packet.packet_type {
             PacketType::ConnectionRequest
@@ -327,9 +337,14 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                 match self.sequence.validate_rx(packet.sequence_number) {
                     SequenceResult::Ok => {}
                     SequenceResult::Gap(expected) => {
-                        self.transition(RastaState::RetransmissionRequested)?;
-                        let _ = expected;
-                        self.send_packet(PacketType::RetransmissionRequest, &[])?;
+                        self.record_diagnostic(
+                            DiagnosticKind::SequenceError,
+                            packet.sequence_number,
+                        );
+                        if self.state_machine.current_state == RastaState::Up {
+                            self.transition(RastaState::RetransmissionRequested)?;
+                            self.send_retransmission_request(expected)?;
+                        }
                         return Ok(());
                     }
                     SequenceResult::Duplicate => return Ok(()),
@@ -337,13 +352,14 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             }
         }
 
+        self.apply_valid_confirmation(peer_confirmation);
+
         // DIN 5.5.6.1: copy the timestamp of every formally correct received
         // message into the next outbound PDU; only time-out related PDUs are
         // analysed by the adaptive monitor.
         self.last_received_timestamp = ProtocolTimestamp::from_wire_millis(packet.timestamp);
-        self.apply_timeliness(&packet, local_now)?;
+        self.apply_timeliness_decision(timeliness_decision, local_now);
         self.heartbeat.restart(local_now);
-        self.apply_confirmation(packet.confirmed_sequence_number)?;
 
         match self.state_machine.current_state {
             RastaState::Down if packet.packet_type == PacketType::ConnectionRequest => {
@@ -388,14 +404,24 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             | RastaState::RetransmissionRunning => {
                 match packet.packet_type {
                     PacketType::RetransmissionRequest => {
-                        self.send_packet(PacketType::RetransmissionResponse, &[])?;
-                        self.retransmit_from(packet.confirmed_sequence_number.wrapping_add(1))?;
+                        let requested_sequence = packet.confirmed_sequence_number.wrapping_add(1);
+                        if !self.retransmission.contains(requested_sequence) {
+                            self.record_diagnostic(
+                                DiagnosticKind::RetransmissionFailure,
+                                requested_sequence,
+                            );
+                            self.disconnect_with_reason(
+                                DisconnectReason::RetransmissionUnavailable,
+                            )?;
+                            return Err(ConnectionError::RetransmissionUnavailable);
+                        }
+                        self.send_retransmission_response(packet.confirmed_sequence_number)?;
+                        self.retransmit_from(requested_sequence)?;
                         // DIN 5.5.11: a regular message terminates retransmission.
                         self.send_packet(PacketType::Heartbeat, &[])?;
                     }
                     PacketType::RetransmissionResponse => {
                         if self.state_machine.current_state == RastaState::RetransmissionRequested {
-                            self.sequence.accept_initial_rx(packet.sequence_number);
                             self.transition(RastaState::RetransmissionRunning)?;
                         } else {
                             return self.reject_unexpected_packet();
@@ -437,48 +463,22 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
     }
 
     pub fn retransmit_from(&mut self, start_seq: u32) -> Result<(), ConnectionError> {
-        let mut count = self.retransmission.count();
         let mut current_seq: u32 = start_seq;
+        let mut sent = 0usize;
 
-        // If start_seq is 0, we find the oldest packet
-        if start_seq == 0 {
-            let mut found_start = false;
-            for p in self.retransmission.packets.iter().flatten() {
-                if !found_start || current_seq.wrapping_sub(p.sequence_number) < 0x80000000 {
-                    current_seq = p.sequence_number;
-                    found_start = true;
-                }
-            }
+        if self.retransmission.count() == 0 || !self.retransmission.contains(start_seq) {
+            return Err(ConnectionError::RetransmissionUnavailable);
         }
 
         let mut iterations = 0;
-        while count > 0 && iterations < self.n_send_max as usize {
+        while iterations < self.n_send_max as usize {
             if let Some(p) = self.retransmission.get_packet(current_seq) {
-                let len = p.payload_len;
-                if len > 256 {
-                    return Err(ConnectionError::InvalidPayloadSize);
-                }
-
-                let mut temp_payload = [0u8; 256];
-                {
-                    let dst = temp_payload
-                        .get_mut(..len)
-                        .ok_or(ConnectionError::InvalidPayloadSize)?;
-                    let src = p
-                        .payload
-                        .get(..len)
-                        .ok_or(ConnectionError::InvalidPayloadSize)?;
-                    dst.copy_from_slice(src);
-                }
-
-                self.send_packet(
-                    PacketType::RetransmissionData,
-                    temp_payload
-                        .get(..len)
-                        .ok_or(ConnectionError::InvalidPayloadSize)?,
-                )?;
-                count -= 1;
-            } else if iterations == 0 {
+                let packet = p.clone();
+                self.send_retransmission_data(packet)?;
+                sent += 1;
+            } else if sent > 0 {
+                break;
+            } else {
                 return Err(ConnectionError::RetransmissionUnavailable);
             }
             current_seq = current_seq.wrapping_add(1);
@@ -530,13 +530,103 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             .tx_buffer
             .get(..size)
             .ok_or(ConnectionError::BufferFull)?;
-        self.redundancy
-            .send(tx_slice)
-            .map_err(ConnectionError::Transport)?;
+        let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
+        self.record_channel_status_transitions();
+        send_result.map_err(ConnectionError::Transport)?;
         self.last_tx_sequence = Some(packet.sequence_number);
 
         if p_type == PacketType::Data && !self.retransmission.store(packet) {
             return Err(ConnectionError::BufferFull);
+        }
+        Ok(())
+    }
+
+    fn send_retransmission_request(
+        &mut self,
+        expected_sequence: u32,
+    ) -> Result<(), ConnectionError> {
+        let sequence_number = self.sequence.next_tx();
+        self.send_packet_with_fields(
+            PacketType::RetransmissionRequest,
+            &[],
+            sequence_number,
+            expected_sequence.wrapping_sub(1),
+            true,
+        )
+    }
+
+    fn send_retransmission_response(
+        &mut self,
+        confirmed_sequence: u32,
+    ) -> Result<(), ConnectionError> {
+        self.send_packet_with_fields(
+            PacketType::RetransmissionResponse,
+            &[],
+            confirmed_sequence,
+            self.sequence.last_received_seq().unwrap_or_default(),
+            false,
+        )
+    }
+
+    fn send_retransmission_data(&mut self, mut packet: Packet) -> Result<(), ConnectionError> {
+        packet.packet_type = PacketType::RetransmissionData;
+        packet.confirmed_sequence_number = self.sequence.last_received_seq().unwrap_or_default();
+        packet.timestamp = self.clock.protocol_timestamp().wire_millis();
+        packet.confirmed_timestamp = self.last_received_timestamp.wire_millis();
+        let size = packet
+            .serialize(&mut self.tx_buffer, &self.safety_code)
+            .map_err(ConnectionError::Packet)?;
+        let tx_slice = self
+            .tx_buffer
+            .get(..size)
+            .ok_or(ConnectionError::BufferFull)?;
+        let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
+        self.record_channel_status_transitions();
+        send_result.map_err(ConnectionError::Transport)?;
+        Ok(())
+    }
+
+    fn send_packet_with_fields(
+        &mut self,
+        p_type: PacketType,
+        payload: &[u8],
+        sequence_number: u32,
+        confirmed_sequence_number: u32,
+        update_last_tx: bool,
+    ) -> Result<(), ConnectionError> {
+        if payload.len() > Packet::MAX_PAYLOAD_SIZE {
+            return Err(ConnectionError::InvalidPayloadSize);
+        }
+        let mut packet = Packet {
+            packet_type: p_type,
+            receiver_id: self.remote_id,
+            sender_id: self.sender_id,
+            sequence_number,
+            confirmed_sequence_number,
+            timestamp: self.clock.protocol_timestamp().wire_millis(),
+            confirmed_timestamp: self.last_received_timestamp.wire_millis(),
+            payload: [0; 256],
+            payload_len: payload.len(),
+        };
+        if !payload.is_empty() {
+            packet
+                .payload
+                .get_mut(..payload.len())
+                .ok_or(ConnectionError::InvalidPayloadSize)?
+                .copy_from_slice(payload);
+        }
+        let size = packet
+            .serialize(&mut self.tx_buffer, &self.safety_code)
+            .map_err(ConnectionError::Packet)?;
+        let tx_slice = self
+            .tx_buffer
+            .get(..size)
+            .ok_or(ConnectionError::BufferFull)?;
+        let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
+        self.record_channel_status_transitions();
+        send_result.map_err(ConnectionError::Transport)?;
+        if update_last_tx {
+            self.last_tx_sequence = Some(sequence_number);
         }
         Ok(())
     }
@@ -568,24 +658,66 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         Err(ConnectionError::UnexpectedPacket)
     }
 
-    fn apply_confirmation(&mut self, confirmed: u32) -> Result<(), ConnectionError> {
-        if let Some(previous) = self.last_confirmed_by_peer
-            && serial::is_before(confirmed, previous)
-        {
-            self.record_diagnostic(DiagnosticKind::ConfirmedSequenceError, confirmed);
-            self.disconnect_with_error()?;
-            return Err(ConnectionError::ProtocolViolation);
+    fn validate_peer_confirmation(
+        &mut self,
+        packet: &Packet,
+    ) -> Result<Option<u32>, ConnectionError> {
+        if !Self::packet_carries_peer_confirmation(packet.packet_type) {
+            return Ok(None);
         }
-        if let Some(last_sent) = self.last_tx_sequence
-            && serial::is_after(confirmed, last_sent)
-        {
-            self.record_diagnostic(DiagnosticKind::ConfirmedSequenceError, confirmed);
-            self.disconnect_with_error()?;
-            return Err(ConnectionError::ProtocolViolation);
+
+        let confirmed = packet.confirmed_sequence_number;
+        let last_peer_confirmed_sequence = self
+            .last_confirmed_by_peer
+            .unwrap_or_else(|| self.initial_tx_sequence.wrapping_sub(1));
+
+        let Some(newest_transmitted_sequence) = self.last_tx_sequence else {
+            if confirmed == last_peer_confirmed_sequence {
+                return Ok(Some(confirmed));
+            }
+            return self.reject_invalid_confirmation(confirmed);
+        };
+
+        let does_not_move_backwards = confirmed == last_peer_confirmed_sequence
+            || serial::is_after(confirmed, last_peer_confirmed_sequence);
+        let does_not_skip_beyond_newest = confirmed == newest_transmitted_sequence
+            || serial::is_before(confirmed, newest_transmitted_sequence);
+
+        if does_not_move_backwards && does_not_skip_beyond_newest {
+            Ok(Some(confirmed))
+        } else {
+            self.reject_invalid_confirmation(confirmed)
         }
-        self.last_confirmed_by_peer = Some(confirmed);
-        self.retransmission.clear_up_to(confirmed);
-        Ok(())
+    }
+
+    fn packet_carries_peer_confirmation(packet_type: PacketType) -> bool {
+        !matches!(
+            packet_type,
+            PacketType::ConnectionRequest | PacketType::RetransmissionRequest
+        )
+    }
+
+    fn reject_invalid_confirmation<T>(&mut self, confirmed: u32) -> Result<T, ConnectionError> {
+        self.record_diagnostic(DiagnosticKind::ConfirmedSequenceError, confirmed);
+        self.disconnect_with_error()?;
+        Err(ConnectionError::ProtocolViolation)
+    }
+
+    fn apply_valid_confirmation(&mut self, confirmed: Option<u32>) {
+        if let Some(confirmed) = confirmed {
+            self.last_confirmed_by_peer = Some(confirmed);
+            self.retransmission.clear_up_to(confirmed);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_peer_confirmed_sequence_for_test(&self) -> Option<u32> {
+        self.last_confirmed_by_peer
+    }
+
+    #[cfg(test)]
+    pub(crate) fn queued_application_tx_count_for_test(&self) -> usize {
+        self.app_tx_count
     }
 
     fn start_timeliness_monitor(&mut self, now: MonotonicInstant) {
@@ -598,47 +730,77 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         self.timeliness_deadline = None;
     }
 
-    fn apply_timeliness(
+    fn validate_timeliness(
         &mut self,
         packet: &Packet,
-        now: MonotonicInstant,
-    ) -> Result<(), ConnectionError> {
+    ) -> Result<Option<ConfirmedTimestampDecision>, ConnectionError> {
         if !matches!(
             packet.packet_type,
             PacketType::Heartbeat | PacketType::Data | PacketType::RetransmissionData
         ) {
-            return Ok(());
+            return Ok(None);
         }
 
         let local_timestamp = self.clock.protocol_timestamp();
+        let supervisor = TimeSupervisor {
+            t_max: self.t_max_duration,
+            future_tolerance: DurationMs::from_millis(TimeSupervisor::DEFAULT_FUTURE_TOLERANCE_MS),
+        };
+        let remote_timestamp = ProtocolTimestamp::from_wire_millis(packet.timestamp);
+        if let Err(error) = supervisor.validate(local_timestamp, remote_timestamp) {
+            self.handle_time_supervision_error(error, packet.timestamp)?;
+            return Err(ConnectionError::SafetyTimeout);
+        }
+
         let reference = self
             .confirmed_timestamp_reference
             .unwrap_or(local_timestamp);
         let confirmed_timestamp = ProtocolTimestamp::from_wire_millis(packet.confirmed_timestamp);
-        let confirmed_distance = confirmed_timestamp.wrapping_elapsed_since(reference);
-        if confirmed_distance.as_millis() >= self.t_max_duration.as_millis() {
-            self.record_diagnostic(
-                DiagnosticKind::ConfirmedTimestampError,
-                packet.confirmed_timestamp,
-            );
-            self.disconnect_with_error()?;
-            return Err(ConnectionError::SafetyTimeout);
+        match supervisor.validate_confirmed_timestamp(
+            local_timestamp,
+            reference,
+            confirmed_timestamp,
+        ) {
+            Ok(decision) => Ok(Some(decision)),
+            Err(error) => {
+                self.handle_time_supervision_error(error, packet.confirmed_timestamp)?;
+                Err(ConnectionError::SafetyTimeout)
+            }
         }
+    }
 
-        let round_trip = local_timestamp.wrapping_elapsed_since(confirmed_timestamp);
-        if round_trip.as_millis() > self.t_max_duration.as_millis() {
-            self.record_diagnostic(DiagnosticKind::ConnectionTimeout, round_trip.as_millis());
-            self.disconnect_with_error()?;
-            return Err(ConnectionError::SafetyTimeout);
-        }
-
-        if confirmed_timestamp == reference || confirmed_timestamp.is_after(reference) {
-            self.confirmed_timestamp_reference = Some(confirmed_timestamp);
-            self.timeliness_deadline = Some(now.deadline_after(DurationMs::from_millis(
-                self.t_max_duration.as_millis() - round_trip.as_millis(),
-            )));
+    fn handle_time_supervision_error(
+        &mut self,
+        error: TimeSupervisionError,
+        value: u32,
+    ) -> Result<(), ConnectionError> {
+        match error {
+            TimeSupervisionError::TimestampTooOld
+            | TimeSupervisionError::TimestampTooFarInFuture => {
+                self.record_diagnostic(DiagnosticKind::ConnectionTimeout, value);
+                self.disconnect_with_reason(DisconnectReason::IncomingMessageTimeout)?;
+            }
+            TimeSupervisionError::ConfirmedTimestampMovedBackwards
+            | TimeSupervisionError::ConfirmedTimestampTooFarInFuture => {
+                self.record_diagnostic(DiagnosticKind::ConfirmedTimestampError, value);
+                self.disconnect_with_error()?;
+            }
         }
         Ok(())
+    }
+
+    fn apply_timeliness_decision(
+        &mut self,
+        decision: Option<ConfirmedTimestampDecision>,
+        now: MonotonicInstant,
+    ) {
+        let Some(decision) = decision else {
+            return;
+        };
+        self.confirmed_timestamp_reference = Some(decision.confirmed_timestamp);
+        self.timeliness_deadline = Some(now.deadline_after(DurationMs::from_millis(
+            self.t_max_duration.as_millis() - decision.round_trip.as_millis(),
+        )));
     }
 
     pub fn receive_data(&mut self, output: &mut [u8]) -> Result<usize, ConnectionError> {
@@ -682,9 +844,29 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         self.error_counters
     }
 
+    pub fn channel_statuses(&self) -> [ChannelStatus; 2] {
+        self.redundancy.channel_statuses()
+    }
+
+    fn record_channel_status_transitions(&mut self) {
+        let statuses = self.redundancy.channel_statuses();
+        for (index, status) in statuses.iter().enumerate() {
+            if *status != self.last_channel_statuses[index] {
+                if matches!(status, ChannelStatus::Degraded | ChannelStatus::Failed) {
+                    self.record_diagnostic(DiagnosticKind::ChannelSupervisionFailure, index as u32);
+                }
+                self.last_channel_statuses[index] = *status;
+            }
+        }
+    }
+
     fn record_diagnostic(&mut self, kind: DiagnosticKind, value: u32) {
         if kind == DiagnosticKind::SafetyCodeError {
             self.error_counters.safety = self.error_counters.safety.saturating_add(1);
+        }
+        if kind == DiagnosticKind::SequenceError {
+            self.error_counters.sequence_number =
+                self.error_counters.sequence_number.saturating_add(1);
         }
         if kind == DiagnosticKind::ConfirmedSequenceError {
             self.error_counters.confirmed_sequence_number = self

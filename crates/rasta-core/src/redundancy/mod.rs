@@ -6,7 +6,7 @@ mod defer_queue;
 mod frame;
 mod sequence;
 
-pub use channel::RedundancyLayer;
+pub use channel::{ChannelCounters, ChannelId, ChannelStatus, RedundancyLayer};
 pub use crc::{RedundancyCrc, calculate, check_code_len};
 
 #[derive(Clone, Copy, Debug, PartialEq)]

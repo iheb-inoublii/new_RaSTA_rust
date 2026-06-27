@@ -10,9 +10,9 @@ mod cases {
     use crate::connection::{ConnectionError, RastaConfig, RastaConnection};
     use crate::port::{RandomError, RandomSource, Transport, TransportError};
     use crate::redundancy::{
-        RedundancyCheckCode, RedundancyConfig, RedundancyCrc, RedundancyLayer,
+        ChannelStatus, RedundancyCheckCode, RedundancyConfig, RedundancyCrc, RedundancyLayer,
     };
-    use crate::srl::{DisconnectReason, SrlState};
+    use crate::srl::{DiagnosticEvent, DiagnosticKind, DisconnectReason, SrlState};
     use crate::time::{
         DurationMs, MonotonicClock, MonotonicInstant, ProtocolTimestamp, ProtocolTimestampSource,
     };
@@ -121,6 +121,30 @@ mod cases {
                 _ => 1,
             }
         }
+
+        fn drop_next(&mut self, channel: usize) -> bool {
+            if self.count[channel] == 0 {
+                return false;
+            }
+            let head = self.head[channel];
+            self.frames[channel][head] = None;
+            self.head[channel] = (head + 1) % 32;
+            self.count[channel] -= 1;
+            true
+        }
+
+        fn peek_payload(&self, channel: usize, output: &mut [u8]) -> Option<usize> {
+            if self.count[channel] == 0 {
+                return None;
+            }
+            let frame = self.frames[channel][self.head[channel]]?;
+            let check_len = 4usize;
+            let payload_start = RedundancyLayer::<LinkedTransport, LinkedTransport>::HEADER_SIZE;
+            let payload_end = frame.len.checked_sub(check_len)?;
+            let payload = frame.bytes.get(payload_start..payload_end)?;
+            output.get_mut(..payload.len())?.copy_from_slice(payload);
+            Some(payload.len())
+        }
     }
 
     #[derive(Clone)]
@@ -173,6 +197,19 @@ mod cases {
             network.head[self.channel] = (head + 1) % 32;
             network.count[self.channel] -= 1;
             Ok(frame.len)
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct FailingTransport;
+
+    impl Transport for FailingTransport {
+        fn send(&mut self, _data: &[u8]) -> Result<(), TransportError> {
+            Err(TransportError::SendFailed)
+        }
+
+        fn receive(&mut self, _buffer: &mut [u8]) -> Result<usize, TransportError> {
+            Ok(0)
         }
     }
 
@@ -269,6 +306,96 @@ mod cases {
             payload: [0; 256],
             payload_len,
         }
+    }
+
+    fn redundancy_frame_from_packet(
+        packet: &Packet,
+        safety: &SafetyCodeConfig,
+    ) -> ([u8; 520], usize) {
+        let mut pdu = [0u8; 512];
+        let pdu_len = packet.serialize(&mut pdu, safety).unwrap();
+        let total =
+            pdu_len + RedundancyLayer::<SimpleMockTransport, SimpleMockTransport>::HEADER_SIZE;
+        let mut frame = [0u8; 520];
+        frame[..2].copy_from_slice(&(total as u16).to_le_bytes());
+        frame[4..8].copy_from_slice(&0u32.to_le_bytes());
+        frame[8..total].copy_from_slice(&pdu[..pdu_len]);
+        (frame, total)
+    }
+
+    fn receive_packet_transport(packet: &Packet, safety: &SafetyCodeConfig) -> SimpleMockTransport {
+        let (frame, len) = redundancy_frame_from_packet(packet, safety);
+        SimpleMockTransport::with_receive(&frame[..len])
+    }
+
+    fn confirmation_connection(
+        initial_seq: u32,
+        n_send_max: u16,
+        mwa: u16,
+    ) -> (
+        RastaConnection<SimpleMockTransport, SimpleMockTransport, FakeClock>,
+        FakeClock,
+    ) {
+        let clock = FakeClock::new(1_000);
+        let mut cfg = config(1, 2);
+        cfg.initial_seq = initial_seq;
+        cfg.n_send_max = n_send_max;
+        cfg.mwa = mwa;
+        let mut connection = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            cfg,
+        )
+        .unwrap();
+        connection.transition(RastaState::Down).unwrap();
+        connection.transition(RastaState::Start).unwrap();
+        connection.transition(RastaState::Up).unwrap();
+        (connection, clock)
+    }
+
+    fn receive_packet(
+        connection: &mut RastaConnection<SimpleMockTransport, SimpleMockTransport, FakeClock>,
+        packet: &Packet,
+    ) {
+        let transport = receive_packet_transport(packet, &connection.safety_code);
+        connection.redundancy = RedundancyLayer::with_config(
+            transport,
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+    }
+
+    fn ack_heartbeat(rx_sequence: u32, confirmed_sequence: u32, timestamp: u32) -> Packet {
+        let mut heartbeat = packet(PacketType::Heartbeat, 0);
+        heartbeat.receiver_id = 1;
+        heartbeat.sender_id = 2;
+        heartbeat.sequence_number = rx_sequence;
+        heartbeat.confirmed_sequence_number = confirmed_sequence;
+        heartbeat.timestamp = timestamp;
+        heartbeat.confirmed_timestamp = timestamp;
+        heartbeat
+    }
+
+    fn data_ack(
+        rx_sequence: u32,
+        confirmed_sequence: u32,
+        timestamp: u32,
+        payload: &[u8],
+    ) -> Packet {
+        let mut data = packet(PacketType::Data, payload.len() + 2);
+        data.receiver_id = 1;
+        data.sender_id = 2;
+        data.sequence_number = rx_sequence;
+        data.confirmed_sequence_number = confirmed_sequence;
+        data.timestamp = timestamp;
+        data.confirmed_timestamp = timestamp;
+        data.payload[..2].copy_from_slice(&(payload.len() as u16).to_le_bytes());
+        data.payload[2..2 + payload.len()].copy_from_slice(payload);
+        data
     }
 
     #[test]
@@ -372,6 +499,28 @@ mod cases {
         heartbeat.payload_len = 1;
         assert!(matches!(
             heartbeat.serialize(&mut buffer, &safety),
+            Err(PacketError::InvalidPayload)
+        ));
+    }
+
+    #[test]
+    fn retransmission_request_uses_zero_payload_and_confirmed_sequence_point() {
+        let safety = SafetyCodeConfig::default();
+        let mut request = packet(PacketType::RetransmissionRequest, 0);
+        request.confirmed_sequence_number = 41;
+        let mut buffer = [0u8; 512];
+        let len = request.serialize(&mut buffer, &safety).unwrap();
+        assert_eq!(len, Packet::HEADER_SIZE + safety.len());
+
+        let parsed = Packet::parse(&buffer[..len], &safety).unwrap();
+        assert_eq!(parsed.packet_type, PacketType::RetransmissionRequest);
+        assert_eq!(parsed.payload_len, 0);
+        assert_eq!(parsed.confirmed_sequence_number, 41);
+
+        request.payload_len = 4;
+        request.payload[..4].copy_from_slice(&42u32.to_le_bytes());
+        assert!(matches!(
+            request.serialize(&mut buffer, &safety),
             Err(PacketError::InvalidPayload)
         ));
     }
@@ -558,6 +707,54 @@ mod cases {
     }
 
     #[test]
+    fn timestamp_validation_covers_future_boundary_and_half_range() {
+        let supervisor = TimeSupervisor::new(100);
+        let timestamp = ProtocolTimestamp::from_wire_millis;
+        assert!(
+            supervisor
+                .validate(timestamp(1000), timestamp(1100))
+                .is_ok()
+        );
+        assert_eq!(
+            supervisor.validate(timestamp(1000), timestamp(1101)),
+            Err(TimeSupervisionError::TimestampTooFarInFuture)
+        );
+        assert_eq!(
+            supervisor.validate(timestamp(0), timestamp(0x8000_0000)),
+            Err(TimeSupervisionError::TimestampTooFarInFuture)
+        );
+    }
+
+    #[test]
+    fn confirmed_timestamp_validation_covers_progression_repeat_future_and_wrap() {
+        let supervisor = TimeSupervisor::new(200);
+        let timestamp = ProtocolTimestamp::from_wire_millis;
+        let repeated = supervisor
+            .validate_confirmed_timestamp(timestamp(100), timestamp(90), timestamp(90))
+            .unwrap();
+        assert_eq!(repeated.round_trip, DurationMs::from_millis(10));
+
+        let progressed = supervisor
+            .validate_confirmed_timestamp(timestamp(120), timestamp(90), timestamp(100))
+            .unwrap();
+        assert_eq!(progressed.confirmed_timestamp, timestamp(100));
+
+        assert_eq!(
+            supervisor.validate_confirmed_timestamp(timestamp(120), timestamp(100), timestamp(99)),
+            Err(TimeSupervisionError::ConfirmedTimestampMovedBackwards)
+        );
+        assert_eq!(
+            supervisor.validate_confirmed_timestamp(timestamp(120), timestamp(100), timestamp(121)),
+            Err(TimeSupervisionError::ConfirmedTimestampTooFarInFuture)
+        );
+
+        let wrapped = supervisor
+            .validate_confirmed_timestamp(timestamp(10), timestamp(u32::MAX - 5), timestamp(5))
+            .unwrap();
+        assert_eq!(wrapped.round_trip, DurationMs::from_millis(5));
+    }
+
+    #[test]
     fn fake_clock_advances_and_wraps_without_sleeping() {
         let clock = FakeClock::new(u32::MAX - 2);
         clock.advance(DurationMs::from_millis(5));
@@ -622,6 +819,304 @@ mod cases {
     }
 
     #[test]
+    fn confirmed_sequence_first_duplicate_single_cumulative_and_boundaries_release_exactly() {
+        let (mut connection, clock) = confirmation_connection(10, 8, 4);
+        for payload in [b"a".as_slice(), b"b", b"c", b"d"] {
+            connection.send_application_data(payload).unwrap();
+        }
+        assert_eq!(connection.retransmission.count(), 4);
+
+        let mut heartbeat = ack_heartbeat(0, 9, 1_000);
+        receive_packet(&mut connection, &heartbeat);
+        connection.process().unwrap();
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), Some(9));
+        assert_eq!(connection.retransmission.count(), 4);
+
+        clock.set(1_001);
+        heartbeat = ack_heartbeat(1, 9, 1_001);
+        receive_packet(&mut connection, &heartbeat);
+        connection.process().unwrap();
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), Some(9));
+        assert_eq!(connection.retransmission.count(), 4);
+
+        clock.set(1_002);
+        heartbeat = ack_heartbeat(2, 10, 1_002);
+        receive_packet(&mut connection, &heartbeat);
+        connection.process().unwrap();
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), Some(10));
+        assert!(connection.retransmission.get_packet(10).is_none());
+        assert!(connection.retransmission.get_packet(11).is_some());
+        assert_eq!(connection.retransmission.count(), 3);
+
+        clock.set(1_003);
+        heartbeat = ack_heartbeat(3, 12, 1_003);
+        receive_packet(&mut connection, &heartbeat);
+        connection.process().unwrap();
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), Some(12));
+        assert!(connection.retransmission.get_packet(11).is_none());
+        assert!(connection.retransmission.get_packet(12).is_none());
+        assert!(connection.retransmission.get_packet(13).is_some());
+        assert_eq!(connection.retransmission.count(), 1);
+
+        clock.set(1_004);
+        heartbeat = ack_heartbeat(4, 13, 1_004);
+        receive_packet(&mut connection, &heartbeat);
+        connection.process().unwrap();
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), Some(13));
+        assert_eq!(connection.retransmission.count(), 0);
+    }
+
+    #[test]
+    fn confirmed_sequence_initial_values_zero_one_max_and_before_max_are_not_sentinels() {
+        for initial in [0, 1, u32::MAX, u32::MAX - 1] {
+            let (mut connection, clock) = confirmation_connection(initial, 4, 2);
+            connection.send_application_data(b"x").unwrap();
+            assert!(connection.retransmission.get_packet(initial).is_some());
+
+            let heartbeat = ack_heartbeat(0, initial, 1_000);
+            receive_packet(&mut connection, &heartbeat);
+            connection.process().unwrap();
+
+            assert_eq!(
+                connection.last_peer_confirmed_sequence_for_test(),
+                Some(initial)
+            );
+            assert_eq!(connection.retransmission.count(), 0);
+            assert_eq!(connection.state_machine.current_state, RastaState::Up);
+            clock.set(clock.now().wrapping_millis().wrapping_add(1));
+        }
+    }
+
+    #[test]
+    fn confirmed_sequence_with_empty_retransmission_buffer_updates_ack_without_release() {
+        let (mut connection, _) = confirmation_connection(5, 4, 2);
+        assert_eq!(connection.retransmission.count(), 0);
+
+        let heartbeat = ack_heartbeat(0, 4, 1_000);
+        receive_packet(&mut connection, &heartbeat);
+        connection.process().unwrap();
+
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), Some(4));
+        assert_eq!(connection.retransmission.count(), 0);
+        assert_eq!(connection.state_machine.current_state, RastaState::Up);
+    }
+
+    #[test]
+    fn wraparound_confirmation_releases_only_confirmed_window_entries() {
+        let (mut connection, clock) = confirmation_connection(u32::MAX - 1, 4, 2);
+        connection.send_application_data(b"a").unwrap();
+        connection.send_application_data(b"b").unwrap();
+        connection.send_application_data(b"c").unwrap();
+        assert!(connection.retransmission.get_packet(u32::MAX - 1).is_some());
+        assert!(connection.retransmission.get_packet(u32::MAX).is_some());
+        assert!(connection.retransmission.get_packet(0).is_some());
+
+        let mut heartbeat = ack_heartbeat(0, u32::MAX, 1_000);
+        receive_packet(&mut connection, &heartbeat);
+        connection.process().unwrap();
+        assert!(connection.retransmission.get_packet(u32::MAX - 1).is_none());
+        assert!(connection.retransmission.get_packet(u32::MAX).is_none());
+        assert!(connection.retransmission.get_packet(0).is_some());
+        assert_eq!(connection.retransmission.count(), 1);
+
+        clock.set(1_001);
+        heartbeat = ack_heartbeat(1, 0, 1_001);
+        receive_packet(&mut connection, &heartbeat);
+        connection.process().unwrap();
+        assert_eq!(connection.retransmission.count(), 0);
+    }
+
+    #[test]
+    fn invalid_confirmations_disconnect_without_releasing_or_delivering() {
+        let (mut connection, clock) = confirmation_connection(20, 4, 2);
+        connection.send_application_data(b"a").unwrap();
+        connection.send_application_data(b"b").unwrap();
+        assert_eq!(connection.retransmission.count(), 2);
+
+        let valid = ack_heartbeat(0, 20, 1_000);
+        receive_packet(&mut connection, &valid);
+        connection.process().unwrap();
+        assert_eq!(connection.retransmission.count(), 1);
+        assert_eq!(connection.sequence.expected_rx(), 1);
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), Some(20));
+
+        clock.set(1_001);
+        let invalid = data_ack(1, 19, 1_001, b"bad");
+        receive_packet(&mut connection, &invalid);
+        assert!(matches!(
+            connection.process(),
+            Err(ConnectionError::ProtocolViolation)
+        ));
+
+        assert_eq!(connection.state_machine.current_state, RastaState::Closed);
+        assert_eq!(connection.sequence.expected_rx(), 1);
+        assert_eq!(connection.retransmission.count(), 1);
+        assert!(connection.retransmission.get_packet(21).is_some());
+        assert!(!connection.has_received_data());
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), Some(20));
+        assert_eq!(connection.error_counters().confirmed_sequence_number, 1);
+        assert_eq!(
+            connection.take_diagnostic().map(|event| event.kind),
+            Some(DiagnosticKind::ConfirmedSequenceError)
+        );
+    }
+
+    #[test]
+    fn confirmation_of_unsent_future_and_half_range_ambiguous_values_are_rejected() {
+        let (mut future, _) = confirmation_connection(0, 4, 2);
+        future.send_application_data(b"x").unwrap();
+        let future_ack = ack_heartbeat(0, 1, 1_000);
+        receive_packet(&mut future, &future_ack);
+        assert!(matches!(
+            future.process(),
+            Err(ConnectionError::ProtocolViolation)
+        ));
+        assert_eq!(future.retransmission.count(), 1);
+
+        let (mut ambiguous, _) = confirmation_connection(1, 4, 2);
+        ambiguous.send_application_data(b"x").unwrap();
+        let ambiguous_ack = ack_heartbeat(0, 0x8000_0000, 1_000);
+        receive_packet(&mut ambiguous, &ambiguous_ack);
+        assert!(matches!(
+            ambiguous.process(),
+            Err(ConnectionError::ProtocolViolation)
+        ));
+        assert_eq!(ambiguous.retransmission.count(), 1);
+    }
+
+    #[test]
+    fn invalid_confirmation_does_not_reopen_flow_control_but_valid_ack_does() {
+        let (mut connection, clock) = confirmation_connection(0, 4, 2);
+        for _ in 0..4 {
+            connection.send_application_data(b"x").unwrap();
+        }
+        assert_eq!(connection.retransmission.count(), 4);
+        connection.send_application_data(b"queued").unwrap();
+        assert_eq!(connection.queued_application_tx_count_for_test(), 1);
+
+        let invalid = ack_heartbeat(0, 4, 1_000);
+        receive_packet(&mut connection, &invalid);
+        assert!(matches!(
+            connection.process(),
+            Err(ConnectionError::ProtocolViolation)
+        ));
+        assert_eq!(connection.retransmission.count(), 4);
+        assert_eq!(connection.queued_application_tx_count_for_test(), 1);
+
+        let (mut connection, clock2) = confirmation_connection(0, 4, 2);
+        for _ in 0..4 {
+            connection.send_application_data(b"x").unwrap();
+        }
+        connection.send_application_data(b"queued").unwrap();
+        assert_eq!(connection.queued_application_tx_count_for_test(), 1);
+
+        let valid = ack_heartbeat(0, 1, 1_000);
+        receive_packet(&mut connection, &valid);
+        connection.process().unwrap();
+        assert_eq!(connection.queued_application_tx_count_for_test(), 0);
+        assert_eq!(connection.retransmission.count(), 3);
+        assert!(connection.retransmission.get_packet(0).is_none());
+        assert!(connection.retransmission.get_packet(1).is_none());
+        assert!(connection.retransmission.get_packet(4).is_some());
+        clock.set(1_001);
+        clock2.set(1_001);
+    }
+
+    #[test]
+    fn retransmission_request_point_is_not_processed_as_cumulative_ack() {
+        let (mut connection, _) = confirmation_connection(0, 8, 4);
+        connection.send_application_data(b"zero").unwrap();
+        connection.send_application_data(b"one").unwrap();
+        assert_eq!(connection.retransmission.count(), 2);
+
+        let mut request = ack_heartbeat(0, 0, 1_000);
+        request.packet_type = PacketType::RetransmissionRequest;
+        receive_packet(&mut connection, &request);
+        connection.process().unwrap();
+
+        assert_eq!(connection.retransmission.count(), 2);
+        assert!(connection.retransmission.get_packet(0).is_some());
+        assert!(connection.retransmission.get_packet(1).is_some());
+        assert_eq!(connection.last_peer_confirmed_sequence_for_test(), None);
+    }
+
+    #[test]
+    fn retransmission_data_confirmation_is_classified_and_releases_retained_packets() {
+        let (mut connection, _) = confirmation_connection(0, 8, 4);
+        connection.send_application_data(b"zero").unwrap();
+        connection.send_application_data(b"one").unwrap();
+        assert_eq!(connection.retransmission.count(), 2);
+
+        let mut data = data_ack(0, 1, 1_000, b"peer");
+        data.packet_type = PacketType::RetransmissionData;
+        receive_packet(&mut connection, &data);
+        connection.process().unwrap();
+
+        assert_eq!(connection.retransmission.count(), 0);
+        assert!(connection.has_received_data());
+    }
+
+    #[test]
+    fn invalid_confirmation_in_retransmission_state_does_not_transition_or_release() {
+        let (mut connection, _) = confirmation_connection(0, 4, 2);
+        connection.send_application_data(b"x").unwrap();
+        connection
+            .transition(RastaState::RetransmissionRequested)
+            .unwrap();
+
+        let mut response = ack_heartbeat(0, 1, 1_000);
+        response.packet_type = PacketType::RetransmissionResponse;
+        receive_packet(&mut connection, &response);
+        assert!(matches!(
+            connection.process(),
+            Err(ConnectionError::ProtocolViolation)
+        ));
+
+        assert_eq!(connection.state_machine.current_state, RastaState::Closed);
+        assert_eq!(connection.retransmission.count(), 1);
+    }
+
+    #[test]
+    fn retransmit_from_validates_window_and_propagates_transport_failure() {
+        let mut empty = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            MockClock { time: 0 },
+            config(1, 2),
+        )
+        .unwrap();
+        assert!(matches!(
+            empty.retransmit_from(0),
+            Err(ConnectionError::RetransmissionUnavailable)
+        ));
+
+        let mut sender = RastaConnection::try_new(
+            FailingTransport,
+            FailingTransport,
+            MockClock { time: 0 },
+            config(1, 2),
+        )
+        .unwrap();
+        let mut stored = packet(PacketType::Data, 4);
+        stored.sequence_number = 7;
+        stored.payload[..4].copy_from_slice(b"data");
+        assert!(sender.retransmission.store(stored));
+        assert!(matches!(
+            sender.retransmit_from(6),
+            Err(ConnectionError::RetransmissionUnavailable)
+        ));
+        assert!(matches!(
+            sender.retransmit_from(8),
+            Err(ConnectionError::RetransmissionUnavailable)
+        ));
+        assert!(matches!(
+            sender.retransmit_from(7),
+            Err(ConnectionError::Transport(TransportError::SendFailed))
+        ));
+        assert_eq!(sender.retransmission.count(), 1);
+    }
+
+    #[test]
     fn test_connection_handshake_start() {
         let clock = MockClock { time: 0 };
         let config = config(123, 456);
@@ -675,6 +1170,31 @@ mod cases {
     }
 
     #[test]
+    fn single_redundancy_channel_send_failure_is_diagnostic_but_connection_continues() {
+        let mut connection = RastaConnection::try_new(
+            FailingTransport,
+            SimpleMockTransport::empty(),
+            MockClock { time: 0 },
+            config(1, 2),
+        )
+        .unwrap();
+        connection.transition(RastaState::Down).unwrap();
+        connection.transition(RastaState::Start).unwrap();
+        connection.transition(RastaState::Up).unwrap();
+
+        connection.send_application_data(b"x").unwrap();
+        assert_eq!(
+            connection.channel_statuses(),
+            [ChannelStatus::Degraded, ChannelStatus::Healthy]
+        );
+        assert_eq!(
+            connection.take_diagnostic().map(|event| event.kind),
+            Some(DiagnosticKind::ChannelSupervisionFailure)
+        );
+        assert_eq!(connection.state_machine.current_state, RastaState::Up);
+    }
+
+    #[test]
     fn two_endpoint_two_channel_connection_and_data_interoperate() {
         let network = Rc::new(RefCell::new(TestNetwork::new()));
         let time = Rc::new(Cell::new(0));
@@ -718,6 +1238,364 @@ mod cases {
             assert_eq!(client.state_machine.current_state, RastaState::Up);
             assert_eq!(server.state_machine.current_state, RastaState::Up);
         }
+    }
+
+    #[test]
+    fn sequence_gap_retransmission_recovers_lost_data_in_order() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(server.state_machine.current_state, RastaState::Up);
+
+        client.send_application_data(b"zero").unwrap();
+        server.process().unwrap();
+        let mut output = [0u8; 32];
+        let len = server.receive_data(&mut output).unwrap();
+        assert_eq!(&output[..len], b"zero");
+
+        client.send_application_data(b"one").unwrap();
+        {
+            let mut network = network.borrow_mut();
+            assert!(network.drop_next(2));
+            assert!(network.drop_next(3));
+        }
+        let missing_sequence = server.sequence.expected_rx();
+
+        client.send_application_data(b"two").unwrap();
+        server.process().unwrap();
+        assert!(!server.has_received_data());
+        time.set(100);
+        server.process().unwrap();
+        assert_eq!(
+            server.state_machine.current_state,
+            RastaState::RetransmissionRequested
+        );
+        assert_eq!(server.sequence.expected_rx(), missing_sequence);
+        assert!(!server.has_received_data());
+        assert_eq!(server.error_counters().sequence_number, 1);
+
+        let mut request_bytes = [0u8; 512];
+        let request_len = network
+            .borrow()
+            .peek_payload(0, &mut request_bytes)
+            .expect("retransmission request frame");
+        let request = Packet::parse(&request_bytes[..request_len], &server.safety_code).unwrap();
+        assert_eq!(request.packet_type, PacketType::RetransmissionRequest);
+        assert_eq!(request.payload_len, 0);
+        assert_eq!(
+            request.confirmed_sequence_number,
+            missing_sequence.wrapping_sub(1)
+        );
+
+        client.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert!(client.retransmission.count() >= 2);
+
+        server.process().unwrap();
+        assert_eq!(server.state_machine.current_state, RastaState::Up);
+        assert_eq!(
+            server.sequence.expected_rx(),
+            client.sequence.next_tx_value()
+        );
+
+        let len = server.receive_data(&mut output).unwrap();
+        assert_eq!(&output[..len], b"one");
+        let len = server.receive_data(&mut output).unwrap();
+        assert_eq!(&output[..len], b"two");
+        assert!(!server.has_received_data());
+        assert_eq!(client.retransmission.count(), 3);
+    }
+
+    #[test]
+    fn peer_silence_times_out_at_exact_t_max_and_sends_disconnect_once() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+
+        time.set(1_999);
+        assert!(client.process().is_ok());
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        {
+            let mut network = network.borrow_mut();
+            while network.drop_next(2) {}
+            while network.drop_next(3) {}
+        }
+
+        time.set(2_000);
+        assert!(matches!(
+            client.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        assert_eq!(client.state_machine.current_state, RastaState::Closed);
+        let mut saw_timeout = false;
+        for _ in 0..4 {
+            if client.take_diagnostic()
+                == Some(DiagnosticEvent {
+                    kind: DiagnosticKind::ConnectionTimeout,
+                    value: 2_000,
+                })
+            {
+                saw_timeout = true;
+                break;
+            }
+        }
+        assert!(saw_timeout);
+
+        let mut disconnect_bytes = [0u8; 512];
+        let disconnect_len = network
+            .borrow()
+            .peek_payload(2, &mut disconnect_bytes)
+            .expect("timeout disconnection request");
+        let disconnect = Packet::parse(&disconnect_bytes[..disconnect_len], &client.safety_code)
+            .expect("parse disconnect");
+        assert_eq!(disconnect.packet_type, PacketType::DisconnectionRequest);
+        assert_eq!(
+            u16::from_le_bytes([disconnect.payload[2], disconnect.payload[3]]),
+            DisconnectReason::IncomingMessageTimeout.code()
+        );
+
+        let count_after_timeout = network.borrow().count[2] + network.borrow().count[3];
+        assert!(client.process().is_ok());
+        assert_eq!(
+            network.borrow().count[2] + network.borrow().count[3],
+            count_after_timeout
+        );
+    }
+
+    #[test]
+    fn valid_peer_heartbeat_restarts_deadline_but_sent_heartbeat_alone_does_not() {
+        let clock = FakeClock::new(0);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            config(1, 2),
+        )
+        .unwrap();
+        conn.connect().unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+
+        let mut heartbeat = packet(PacketType::Heartbeat, 0);
+        heartbeat.receiver_id = 1;
+        heartbeat.sender_id = 2;
+        heartbeat.sequence_number = 10;
+        heartbeat.confirmed_sequence_number = 0;
+        heartbeat.timestamp = 1_500;
+        heartbeat.confirmed_timestamp = 1_499;
+        clock.set(1_500);
+        conn.redundancy = RedundancyLayer::with_config(
+            receive_packet_transport(&heartbeat, &conn.safety_code),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+
+        conn.process().unwrap();
+        assert_eq!(conn.state_machine.current_state, RastaState::Up);
+
+        clock.set(3_498);
+        assert!(conn.process().is_ok());
+        assert_eq!(conn.state_machine.current_state, RastaState::Up);
+
+        clock.set(3_499);
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        assert_eq!(conn.state_machine.current_state, RastaState::Closed);
+    }
+
+    #[test]
+    fn invalid_remote_timestamp_rejects_packet_before_sequence_or_deadline_refresh() {
+        let clock = FakeClock::new(3_000);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock,
+            config(1, 2),
+        )
+        .unwrap();
+        conn.transition(RastaState::Down).unwrap();
+        conn.transition(RastaState::Start).unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+
+        let mut invalid = packet(PacketType::Data, 7);
+        invalid.receiver_id = 1;
+        invalid.sender_id = 2;
+        invalid.sequence_number = 10;
+        invalid.timestamp = 999;
+        invalid.confirmed_timestamp = 3_000;
+        invalid.payload[..2].copy_from_slice(&5u16.to_le_bytes());
+        invalid.payload[2..7].copy_from_slice(b"stale");
+        conn.redundancy = RedundancyLayer::with_config(
+            receive_packet_transport(&invalid, &conn.safety_code),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        assert_eq!(conn.state_machine.current_state, RastaState::Closed);
+        assert_eq!(conn.sequence.expected_rx(), 10);
+        assert!(!conn.has_received_data());
+        assert_eq!(
+            conn.take_diagnostic().map(|event| event.kind),
+            Some(DiagnosticKind::ConnectionTimeout)
+        );
+    }
+
+    #[test]
+    fn invalid_confirmed_timestamp_rejects_packet_before_sequence_or_deadline_refresh() {
+        let clock = FakeClock::new(1_000);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            config(1, 2),
+        )
+        .unwrap();
+        conn.transition(RastaState::Down).unwrap();
+        conn.transition(RastaState::Start).unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+
+        let mut valid = packet(PacketType::Heartbeat, 0);
+        valid.receiver_id = 1;
+        valid.sender_id = 2;
+        valid.sequence_number = 10;
+        valid.confirmed_sequence_number = u32::MAX;
+        valid.timestamp = 1_000;
+        valid.confirmed_timestamp = 1_000;
+        conn.redundancy = RedundancyLayer::with_config(
+            receive_packet_transport(&valid, &conn.safety_code),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+        conn.process().unwrap();
+        assert_eq!(conn.sequence.expected_rx(), 11);
+
+        clock.set(1_001);
+        let mut invalid = packet(PacketType::Heartbeat, 0);
+        invalid.receiver_id = 1;
+        invalid.sender_id = 2;
+        invalid.sequence_number = 11;
+        invalid.confirmed_sequence_number = u32::MAX;
+        invalid.timestamp = 1_001;
+        invalid.confirmed_timestamp = 999;
+        conn.redundancy = RedundancyLayer::with_config(
+            receive_packet_transport(&invalid, &conn.safety_code),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        assert_eq!(conn.state_machine.current_state, RastaState::Closed);
+        assert_eq!(conn.sequence.expected_rx(), 11);
+        assert_eq!(
+            conn.take_diagnostic().map(|event| event.kind),
+            Some(DiagnosticKind::ConfirmedTimestampError)
+        );
+    }
+
+    #[test]
+    fn wraparound_timestamps_and_deadlines_remain_valid() {
+        let clock = FakeClock::new(u32::MAX - 10);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            config(1, 2),
+        )
+        .unwrap();
+        conn.connect().unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+
+        let mut valid = packet(PacketType::Heartbeat, 0);
+        valid.receiver_id = 1;
+        valid.sender_id = 2;
+        valid.sequence_number = 10;
+        valid.confirmed_sequence_number = 0;
+        valid.timestamp = u32::MAX - 9;
+        valid.confirmed_timestamp = u32::MAX - 10;
+        clock.set(u32::MAX - 9);
+        conn.redundancy = RedundancyLayer::with_config(
+            receive_packet_transport(&valid, &conn.safety_code),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+        conn.process().unwrap();
+        assert_eq!(conn.state_machine.current_state, RastaState::Up);
+
+        clock.set(1_988);
+        assert!(conn.process().is_ok());
+        clock.set(1_989);
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        assert_eq!(conn.state_machine.current_state, RastaState::Closed);
     }
 
     #[test]
@@ -952,7 +1830,7 @@ mod cases {
             receiver_id: 1,
             sender_id: 2,
             sequence_number: 100,
-            confirmed_sequence_number: 0,
+            confirmed_sequence_number: u32::MAX,
             timestamp: 0,
             confirmed_timestamp: 0,
             packet_type: PacketType::Data,

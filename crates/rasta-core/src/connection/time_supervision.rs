@@ -6,12 +6,20 @@ use crate::time::{DurationMs, ProtocolTimestamp};
 pub enum TimeSupervisionError {
     TimestampTooOld,
     TimestampTooFarInFuture,
+    ConfirmedTimestampMovedBackwards,
+    ConfirmedTimestampTooFarInFuture,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct TimeSupervisor {
     pub t_max: DurationMs,
     pub future_tolerance: DurationMs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfirmedTimestampDecision {
+    pub confirmed_timestamp: ProtocolTimestamp,
+    pub round_trip: DurationMs,
 }
 
 impl TimeSupervisor {
@@ -43,5 +51,35 @@ impl TimeSupervisor {
         }
 
         Ok(())
+    }
+
+    pub fn validate_confirmed_timestamp(
+        &self,
+        local_timestamp: ProtocolTimestamp,
+        reference: ProtocolTimestamp,
+        confirmed_timestamp: ProtocolTimestamp,
+    ) -> Result<ConfirmedTimestampDecision, TimeSupervisionError> {
+        if confirmed_timestamp.is_after(local_timestamp) {
+            return Err(TimeSupervisionError::ConfirmedTimestampTooFarInFuture);
+        }
+
+        if confirmed_timestamp != reference && !confirmed_timestamp.is_after(reference) {
+            return Err(TimeSupervisionError::ConfirmedTimestampMovedBackwards);
+        }
+
+        let confirmed_distance = confirmed_timestamp.wrapping_elapsed_since(reference);
+        if confirmed_distance.as_millis() >= self.t_max.as_millis() {
+            return Err(TimeSupervisionError::ConfirmedTimestampTooFarInFuture);
+        }
+
+        let round_trip = local_timestamp.wrapping_elapsed_since(confirmed_timestamp);
+        if round_trip.as_millis() > self.t_max.as_millis() {
+            return Err(TimeSupervisionError::TimestampTooOld);
+        }
+
+        Ok(ConfirmedTimestampDecision {
+            confirmed_timestamp,
+            round_trip,
+        })
     }
 }
