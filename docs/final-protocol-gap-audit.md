@@ -212,7 +212,8 @@ changing production code.
   timestamp sources.
 - `apps/rasta-node` owns CLI, profile wiring, two UDP transports, and node
   lifecycle.
-- Root `rasta_stack` remains a compatibility facade.
+- The root `rasta_stack` compatibility facade has been removed; active code
+  lives in `crates/rasta-core`, `crates/rasta-platform`, and `apps/rasta-node`.
 
 ## Diagnostics, counters, and disconnect inventory
 

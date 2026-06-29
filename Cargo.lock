@@ -20,11 +20,3 @@ version = "0.1.0"
 dependencies = [
  "rasta-core",
 ]
-
-[[package]]
-name = "rasta_stack"
-version = "0.1.0"
-dependencies = [
- "rasta-core",
- "rasta-platform",
-]

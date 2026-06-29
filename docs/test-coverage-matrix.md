@@ -15,7 +15,6 @@ Baseline before this phase:
 | `rasta-core` | 46 |
 | `rasta-platform` | 3 |
 | `rasta-node` | 1 |
-| `rasta_stack` | 0 |
 | Total | 50 |
 
 ## Module matrix

@@ -1,4 +1,4 @@
-# Cargo workspace migration
+# Cargo workspace architecture
 
 ## Current active architecture
 
@@ -27,10 +27,6 @@ redundancy.
 `apps/rasta-node` owns the runnable demonstration node and the academic
 interoperability-test profile in `apps/rasta-node/src/profile.rs`.
 
-The original root package, `rasta_stack`, remains in place as a temporary
-compatibility facade. Its retained protocol and adapter paths forward to the
-canonical workspace crates.
-
 ## Removed obsolete compatibility modules
 
 The old `Timer` abstraction and `StdTimer` adapter were removed after typed
@@ -38,15 +34,18 @@ monotonic deadlines became canonical. The unused logger trait, Linux/Windows UDP
 alias modules, and public mock transport module were also removed because they
 had no active consumers.
 
-## Planned phases
+The original root package, `rasta_stack`, and its `src/` compatibility facade
+have also been removed. Downstream users should import the canonical workspace
+crates directly.
+
+## Completed migration phases
 
 1. Move platform-independent protocol utilities and port traits to `rasta-core`.
 2. Group redundancy logic under the core crate without changing its behavior.
 3. Replace the clock abstraction with typed monotonic time and add tests.
 4. Move concrete adapters to `rasta-platform`.
 5. Move the runnable node to `apps/rasta-node`.
-6. Remove remaining temporary compatibility modules after downstream import
-   migration.
+6. Remove remaining temporary compatibility modules.
 
 ## Protocol state names
 

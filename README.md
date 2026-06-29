@@ -39,8 +39,7 @@ RaSTA protocol core               crates/rasta-core/
 `rasta-core` owns the platform-independent protocol implementation and remains
 `#![no_std]`. `rasta-platform` owns concrete adapters such as UDP, standard
 clock, and embedded Ethernet. `apps/rasta-node` owns the runnable UDP demo and
-its non-production profile. The root `rasta_stack` package remains temporarily
-as a compatibility facade.
+its non-production profile.
 
 ## Build
 
@@ -186,10 +185,8 @@ parameters.
 ```text
 Cargo.toml                            workspace configuration
 README.md                             project status and safe-use guidance
-docs/development-guide.md             learning/development guide
 docs/din-rasta-03-03-traceability.md  implementation-status traceability
 crates/rasta-core/                    platform-independent protocol core
 crates/rasta-platform/                concrete platform adapters
 apps/rasta-node/                      runnable UDP demonstration node
-src/                                  temporary rasta_stack compatibility facade
 ```
