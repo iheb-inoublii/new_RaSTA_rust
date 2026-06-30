@@ -1,5 +1,5 @@
 use crate::connection::state_machine::RastaState;
-use crate::connection::{ConnectionError, RastaConfig, RastaConnection};
+use crate::connection::{ConnectionError, RastaConfig, RastaConnection, TimestampTraceEvent};
 use crate::port::{RandomSource, Transport};
 use crate::srl::DiagnosticEvent;
 use crate::time::{MonotonicClock, ProtocolTimestampSource};
@@ -94,6 +94,10 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
 
     pub fn take_diagnostic(&mut self) -> Option<DiagnosticEvent> {
         self.connection.take_diagnostic()
+    }
+
+    pub fn take_timestamp_trace(&mut self) -> Option<TimestampTraceEvent> {
+        self.connection.take_timestamp_trace()
     }
 
     pub fn status(&self) -> ConnectionStatus {

@@ -8,6 +8,7 @@ pub mod time_supervision;
 
 pub use crate::config::RastaConfig;
 
+use crate::config::TimestampCompatibilityMode;
 use crate::connection::heartbeat::HeartbeatHandler;
 use crate::connection::pdu::{Packet, PacketError, PacketType};
 use crate::connection::retransmission::RetransmissionBuffer;
@@ -28,6 +29,26 @@ use crate::{
     queue::{FixedQueue, FixedQueueError},
     srl::{DiagnosticEvent, DiagnosticKind, SrlErrorCounters},
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimestampTraceRejection {
+    RemoteTimestampTooOld,
+    RemoteTimestampTooFarInFuture,
+    RemoteTimestampMovedBackwards,
+    ConfirmedTimestampMovedBackwards,
+    ConfirmedTimestampTooFarInFuture,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimestampTraceEvent {
+    pub raw_peer_timestamp: u32,
+    pub learned_peer_offset: Option<u32>,
+    pub normalized_peer_timestamp: u32,
+    pub local_timestamp: u32,
+    pub local_receive_deadline: Option<u32>,
+    pub confirmed_timestamp: u32,
+    pub rejection: Option<TimestampTraceRejection>,
+}
 
 #[derive(Debug)]
 pub enum ConnectionError {
@@ -74,6 +95,10 @@ pub struct RastaConnection<
     last_received_timestamp: ProtocolTimestamp,
     confirmed_timestamp_reference: Option<ProtocolTimestamp>,
     timeliness_deadline: Option<MonotonicInstant>,
+    timestamp_compatibility: TimestampCompatibilityMode,
+    peer_to_local_timestamp_offset: Option<DurationMs>,
+    last_peer_timestamp: Option<ProtocolTimestamp>,
+    timestamp_traces: FixedQueue<TimestampTraceEvent, 16>,
     rx_buffer: [u8; 512],
     tx_buffer: [u8; 512],
     app_rx_buffer: [[u8; 256]; 20],
@@ -114,14 +139,17 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             || config.mwa == 0
             || config.mwa >= config.n_send_max
             || config.redundancy.t_seq_ms == 0
-            || matches!(
-                config.safety_code.mode,
-                crate::connection::safety_code::SafetyCodeMode::None
-            )
-            || matches!(
-                config.redundancy.check_code,
-                crate::redundancy::RedundancyCheckCode::None
-            )
+            || (!config.allow_unsafe_no_checksums
+                && matches!(
+                    config.safety_code.mode,
+                    crate::connection::safety_code::SafetyCodeMode::None
+                ))
+            || (!config.allow_unsafe_no_checksums
+                && matches!(
+                    config.redundancy.check_code,
+                    crate::redundancy::RedundancyCheckCode::None
+                        | crate::redundancy::RedundancyCheckCode::OptionA
+                ))
         {
             return Err(ConnectionError::InvalidConfiguration);
         }
@@ -148,6 +176,10 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             last_received_timestamp: ProtocolTimestamp::from_wire_millis(0),
             confirmed_timestamp_reference: None,
             timeliness_deadline: None,
+            timestamp_compatibility: config.timestamp_compatibility,
+            peer_to_local_timestamp_offset: None,
+            last_peer_timestamp: None,
+            timestamp_traces: FixedQueue::new(),
             rx_buffer: [0; 512],
             tx_buffer: [0; 512],
             app_rx_buffer: [[0; 256]; 20],
@@ -317,7 +349,8 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             }
         }
 
-        let timeliness_decision = self.validate_timeliness(&packet, local_timestamp)?;
+        self.observe_peer_timestamp(&packet, local_timestamp);
+        let timeliness_decision = self.validate_timeliness(&packet, local_now, local_timestamp)?;
         let peer_confirmation = self.validate_peer_confirmation(&packet)?;
 
         match packet.packet_type {
@@ -728,6 +761,18 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         self.timeliness_deadline
     }
 
+    #[cfg(test)]
+    pub(crate) fn learn_peer_timestamp_offset_for_test(
+        &mut self,
+        local_timestamp: u32,
+        peer_timestamp: u32,
+    ) {
+        self.peer_to_local_timestamp_offset = Some(
+            ProtocolTimestamp::from_wire_millis(local_timestamp)
+                .wrapping_elapsed_since(ProtocolTimestamp::from_wire_millis(peer_timestamp)),
+        );
+    }
+
     fn start_timeliness_monitor(&mut self, now: MonotonicInstant) {
         self.confirmed_timestamp_reference = Some(self.clock.protocol_timestamp());
         self.timeliness_deadline = Some(now.deadline_after(self.t_max_duration));
@@ -742,11 +787,14 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
     fn stop_timeliness_monitor(&mut self) {
         self.confirmed_timestamp_reference = None;
         self.timeliness_deadline = None;
+        self.peer_to_local_timestamp_offset = None;
+        self.last_peer_timestamp = None;
     }
 
     fn validate_timeliness(
         &mut self,
         packet: &Packet,
+        local_now: MonotonicInstant,
         local_timestamp: ProtocolTimestamp,
     ) -> Result<Option<ConfirmedTimestampDecision>, ConnectionError> {
         if !matches!(
@@ -761,8 +809,40 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             future_tolerance: DurationMs::from_millis(TimeSupervisor::DEFAULT_FUTURE_TOLERANCE_MS),
         };
         let remote_timestamp = ProtocolTimestamp::from_wire_millis(packet.timestamp);
-        if let Err(error) = supervisor.validate(local_timestamp, remote_timestamp) {
-            self.handle_time_supervision_error(error, packet.timestamp)?;
+        let normalized_remote_timestamp =
+            match self.validate_remote_timestamp(&supervisor, local_timestamp, remote_timestamp) {
+                Ok(timestamp) => timestamp,
+                Err(error) => {
+                    self.record_timestamp_trace(
+                        packet,
+                        local_timestamp,
+                        normalized_timestamp_for_trace(
+                            remote_timestamp,
+                            self.peer_to_local_timestamp_offset,
+                        ),
+                        Some(timestamp_rejection_from_remote_error(error)),
+                        Some(local_now.deadline_after(self.t_max_duration)),
+                    );
+                    self.handle_time_supervision_error(error, packet.timestamp)?;
+                    return Err(ConnectionError::SafetyTimeout);
+                }
+            };
+
+        if let Some(previous) = self.last_peer_timestamp
+            && remote_timestamp != previous
+            && !remote_timestamp.is_after(previous)
+        {
+            self.record_timestamp_trace(
+                packet,
+                local_timestamp,
+                normalized_remote_timestamp,
+                Some(TimestampTraceRejection::RemoteTimestampMovedBackwards),
+                Some(local_now.deadline_after(self.t_max_duration)),
+            );
+            self.handle_time_supervision_error(
+                TimeSupervisionError::TimestampTooOld,
+                packet.timestamp,
+            )?;
             return Err(ConnectionError::SafetyTimeout);
         }
 
@@ -775,12 +855,66 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             reference,
             confirmed_timestamp,
         ) {
-            Ok(decision) => Ok(Some(decision)),
+            Ok(decision) => {
+                self.last_peer_timestamp = Some(remote_timestamp);
+                self.record_timestamp_trace(
+                    packet,
+                    local_timestamp,
+                    normalized_remote_timestamp,
+                    None,
+                    Some(local_now.deadline_after(self.t_max_duration)),
+                );
+                Ok(Some(decision))
+            }
             Err(error) => {
+                self.record_timestamp_trace(
+                    packet,
+                    local_timestamp,
+                    normalized_remote_timestamp,
+                    Some(timestamp_rejection_from_confirmed_error(error)),
+                    Some(local_now.deadline_after(self.t_max_duration)),
+                );
                 self.handle_time_supervision_error(error, packet.confirmed_timestamp)?;
                 Err(ConnectionError::SafetyTimeout)
             }
         }
+    }
+
+    fn observe_peer_timestamp(&mut self, packet: &Packet, local_timestamp: ProtocolTimestamp) {
+        if self.timestamp_compatibility != TimestampCompatibilityMode::PeerRelative
+            || self.peer_to_local_timestamp_offset.is_some()
+        {
+            return;
+        }
+
+        if matches!(
+            packet.packet_type,
+            PacketType::ConnectionRequest | PacketType::ConnectionResponse
+        ) {
+            let peer_timestamp = ProtocolTimestamp::from_wire_millis(packet.timestamp);
+            self.peer_to_local_timestamp_offset =
+                Some(local_timestamp.wrapping_elapsed_since(peer_timestamp));
+        }
+    }
+
+    fn validate_remote_timestamp(
+        &self,
+        supervisor: &TimeSupervisor,
+        local_timestamp: ProtocolTimestamp,
+        remote_timestamp: ProtocolTimestamp,
+    ) -> Result<ProtocolTimestamp, TimeSupervisionError> {
+        if self.timestamp_compatibility == TimestampCompatibilityMode::PeerRelative {
+            let Some(offset) = self.peer_to_local_timestamp_offset else {
+                supervisor.validate(local_timestamp, remote_timestamp)?;
+                return Ok(remote_timestamp);
+            };
+            return supervisor
+                .validate_peer_relative(local_timestamp, remote_timestamp, offset)
+                .map(|decision| decision.normalized_timestamp);
+        }
+
+        supervisor.validate(local_timestamp, remote_timestamp)?;
+        Ok(remote_timestamp)
     }
 
     fn handle_time_supervision_error(
@@ -861,6 +995,10 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         self.diagnostics.pop()
     }
 
+    pub fn take_timestamp_trace(&mut self) -> Option<TimestampTraceEvent> {
+        self.timestamp_traces.pop()
+    }
+
     pub fn diagnostic_overflow_count(&self) -> u32 {
         self.diagnostic_overflow_count
     }
@@ -902,6 +1040,27 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         if self.diagnostics.push(DiagnosticEvent { kind, value }) == Err(FixedQueueError::Full) {
             self.diagnostic_overflow_count = self.diagnostic_overflow_count.saturating_add(1);
         }
+    }
+
+    fn record_timestamp_trace(
+        &mut self,
+        packet: &Packet,
+        local_timestamp: ProtocolTimestamp,
+        normalized_peer_timestamp: ProtocolTimestamp,
+        rejection: Option<TimestampTraceRejection>,
+        local_receive_deadline: Option<MonotonicInstant>,
+    ) {
+        let _ = self.timestamp_traces.push(TimestampTraceEvent {
+            raw_peer_timestamp: packet.timestamp,
+            learned_peer_offset: self
+                .peer_to_local_timestamp_offset
+                .map(DurationMs::as_millis),
+            normalized_peer_timestamp: normalized_peer_timestamp.wire_millis(),
+            local_timestamp: local_timestamp.wire_millis(),
+            local_receive_deadline: local_receive_deadline.map(MonotonicInstant::wrapping_millis),
+            confirmed_timestamp: packet.confirmed_timestamp,
+            rejection,
+        });
     }
 
     fn enqueue_application_data(&mut self, packet: &Packet) -> Result<(), ConnectionError> {
@@ -1022,5 +1181,48 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         }
         self.remote_n_send_max = nsend;
         Ok(())
+    }
+}
+
+fn normalized_timestamp_for_trace(
+    remote_timestamp: ProtocolTimestamp,
+    offset: Option<DurationMs>,
+) -> ProtocolTimestamp {
+    ProtocolTimestamp::from_wire_millis(
+        remote_timestamp
+            .wire_millis()
+            .wrapping_add(offset.map(DurationMs::as_millis).unwrap_or(0)),
+    )
+}
+
+fn timestamp_rejection_from_remote_error(error: TimeSupervisionError) -> TimestampTraceRejection {
+    match error {
+        TimeSupervisionError::TimestampTooOld => TimestampTraceRejection::RemoteTimestampTooOld,
+        TimeSupervisionError::TimestampTooFarInFuture => {
+            TimestampTraceRejection::RemoteTimestampTooFarInFuture
+        }
+        TimeSupervisionError::ConfirmedTimestampMovedBackwards => {
+            TimestampTraceRejection::ConfirmedTimestampMovedBackwards
+        }
+        TimeSupervisionError::ConfirmedTimestampTooFarInFuture => {
+            TimestampTraceRejection::ConfirmedTimestampTooFarInFuture
+        }
+    }
+}
+
+fn timestamp_rejection_from_confirmed_error(
+    error: TimeSupervisionError,
+) -> TimestampTraceRejection {
+    match error {
+        TimeSupervisionError::ConfirmedTimestampMovedBackwards => {
+            TimestampTraceRejection::ConfirmedTimestampMovedBackwards
+        }
+        TimeSupervisionError::ConfirmedTimestampTooFarInFuture => {
+            TimestampTraceRejection::ConfirmedTimestampTooFarInFuture
+        }
+        TimeSupervisionError::TimestampTooOld => TimestampTraceRejection::RemoteTimestampTooOld,
+        TimeSupervisionError::TimestampTooFarInFuture => {
+            TimestampTraceRejection::RemoteTimestampTooFarInFuture
+        }
     }
 }

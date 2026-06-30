@@ -288,6 +288,9 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
         let Some(option) = self.config.crc_option() else {
             return Ok(());
         };
+        if self.config.check_code_len() == 0 {
+            return Ok(());
+        }
         let crc = calculate(
             option,
             frame
@@ -310,6 +313,9 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
             return Ok(true);
         };
         let check_len = self.config.check_code_len();
+        if check_len == 0 {
+            return Ok(true);
+        }
         let check_start = total_len
             .checked_sub(check_len)
             .ok_or(TransportError::InvalidFrame)?;

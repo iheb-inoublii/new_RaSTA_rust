@@ -35,6 +35,13 @@ impl SafetyCodeConfig {
         }
     }
 
+    pub fn none() -> Self {
+        Self {
+            mode: SafetyCodeMode::None,
+            md4_initial_value: Self::STANDARD_MD4_INITIAL_VALUE,
+        }
+    }
+
     pub fn len(&self) -> usize {
         match self.mode {
             SafetyCodeMode::None => 0,

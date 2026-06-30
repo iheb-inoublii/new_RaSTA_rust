@@ -4,6 +4,7 @@ Do not mark `Match?` as yes until the peer configuration is inspected directly.
 
 | Parameter | Rust value | Peer value | Match? | Source/reference | Notes |
 |---|---|---|---|---|---|
+| selectable profile | `academic` default; `librasta-local` opt-in | C librasta local config | Partial | `apps/rasta-node/src/main.rs` | Wire length/layout only; no mixed handshake claim |
 | RaSTA version | ASCII `0303` | Pending | Pending | `apps/rasta-node/src/profile.rs` | Academic test profile |
 | local node ID | A: `0x1234`, B: `0x5678` by default | Pending | Pending | `apps/rasta-node/src/main.rs` | Override with `--local-id` |
 | remote node ID | A: `0x5678`, B: `0x1234` by default | Pending | Pending | `apps/rasta-node/src/main.rs` | Override with `--remote-id` |
@@ -24,3 +25,17 @@ Do not mark `Match?` as yes until the peer configuration is inspected directly.
 | maximum packet size | SRL payload 256 bytes | Pending | Pending | `crates/rasta-core/src/connection/pdu.rs` | Fixed core buffer |
 | byte order assumptions | little-endian SRL/RL numeric fields | Pending | Pending | core PDU/RL frame code | Verify by capture |
 | connection initiator | Lower sender ID opens actively | Pending | Pending | `RastaConnection::connect` | Default A initiates |
+
+## `librasta-local` opt-in profile
+
+This profile is a minimal wire-layout preset for local librasta experiments:
+
+```bash
+cargo run -p rasta-node --release -- A 127.0.0.1 --profile librasta-local --trace-wire
+```
+
+It uses client ID `0x60`, server ID `0x61`, client ports `9998/9999`,
+server ports `8888/8889`, RaSTA version `0303`, network ID `1234`,
+`T_h = 2000 ms`, `T_max = 10000 ms`, SR checksum length NONE, and redundancy
+TYPE_A with zero CRC bytes. This only establishes matching frame lengths and
+field offsets; it is not a completed mixed Rust/C handshake result.

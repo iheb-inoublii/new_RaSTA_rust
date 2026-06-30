@@ -1,10 +1,11 @@
 mod profile;
 
-use profile::DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE;
-use rasta_core::config::RastaConfig;
+use profile::{DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE};
+use rasta_core::config::{RastaConfig, SafetyCodeLength};
+use rasta_core::connection::TimestampTraceEvent;
 use rasta_core::connection::safety_code::SafetyCodeConfig;
 use rasta_core::port::{Transport, TransportError};
-use rasta_core::redundancy::{RedundancyCheckCode, RedundancyConfig};
+use rasta_core::redundancy::{RedundancyCheckCode, RedundancyConfig, RedundancyCrc};
 use rasta_core::service::{ConnectionStatus, RastaService};
 use rasta_platform::std_clock::StdClock;
 use rasta_platform::udp::UdpSocketTransport;
@@ -13,7 +14,10 @@ use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::rc::Rc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const DEFAULT_RUN_SECONDS: u64 = 5;
+const MAX_RUN_SECONDS: u64 = 24 * 60 * 60;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NodeRole {
@@ -21,9 +25,16 @@ enum NodeRole {
     B,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeProfile {
+    Academic,
+    LibrastaLocal,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NodeSettings {
     role: NodeRole,
+    profile: RuntimeProfile,
     local_addr_a: String,
     remote_addr_a: String,
     local_addr_b: String,
@@ -31,6 +42,18 @@ struct NodeSettings {
     sender_id: u32,
     remote_id: u32,
     trace_wire: bool,
+    run_seconds: u64,
+    run_seconds_supplied: bool,
+}
+
+#[derive(Clone, Copy)]
+struct EndpointDefaults {
+    channel_0_local_port: u16,
+    channel_0_remote_port: u16,
+    channel_1_local_port: u16,
+    channel_1_remote_port: u16,
+    sender_id: u32,
+    remote_id: u32,
 }
 
 fn parse_node_settings(args: &[String]) -> Result<NodeSettings, &'static str> {
@@ -39,44 +62,35 @@ fn parse_node_settings(args: &[String]) -> Result<NodeSettings, &'static str> {
     }
 
     let remote_ip = parse_ip(&args[2])?;
+    let role = match args[1].as_str() {
+        "A" => NodeRole::A,
+        "B" => NodeRole::B,
+        _ => return Err("invalid role"),
+    };
     let mut local_ip = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     let mut trace_wire = false;
-    let mut channel_0_local_port = match args[1].as_str() {
-        "A" => 5000,
-        "B" => 5001,
-        _ => return Err("invalid role"),
-    };
-    let mut channel_0_remote_port = match args[1].as_str() {
-        "A" => 5001,
-        "B" => 5000,
-        _ => return Err("invalid role"),
-    };
-    let mut channel_1_local_port = match args[1].as_str() {
-        "A" => 6000,
-        "B" => 6001,
-        _ => return Err("invalid role"),
-    };
-    let mut channel_1_remote_port = match args[1].as_str() {
-        "A" => 6001,
-        "B" => 6000,
-        _ => return Err("invalid role"),
-    };
-    let mut sender_id = match args[1].as_str() {
-        "A" => 0x1234,
-        "B" => 0x5678,
-        _ => return Err("invalid role"),
-    };
-    let mut remote_id = match args[1].as_str() {
-        "A" => 0x5678,
-        "B" => 0x1234,
-        _ => return Err("invalid role"),
-    };
+    let mut run_seconds = DEFAULT_RUN_SECONDS;
+    let mut run_seconds_supplied = false;
+    let mut profile = RuntimeProfile::Academic;
+    let mut endpoint = academic_defaults(role);
 
     let mut index = 3;
     while index < args.len() {
         match args[index].as_str() {
+            "--profile" => {
+                index += 1;
+                profile = parse_runtime_profile(args.get(index).ok_or("missing option value")?)?;
+                apply_profile_defaults(profile, role, &mut endpoint);
+                index += 1;
+            }
             "--trace-wire" => {
                 trace_wire = true;
+                index += 1;
+            }
+            "--run-seconds" => {
+                index += 1;
+                run_seconds = parse_run_seconds(args.get(index).ok_or("missing option value")?)?;
+                run_seconds_supplied = true;
                 index += 1;
             }
             "--local-ip" => {
@@ -86,68 +100,136 @@ fn parse_node_settings(args: &[String]) -> Result<NodeSettings, &'static str> {
             }
             "--channel-0-local-port" => {
                 index += 1;
-                channel_0_local_port = parse_port(args.get(index).ok_or("missing option value")?)?;
+                endpoint.channel_0_local_port =
+                    parse_port(args.get(index).ok_or("missing option value")?)?;
                 index += 1;
             }
             "--channel-0-remote-port" => {
                 index += 1;
-                channel_0_remote_port = parse_port(args.get(index).ok_or("missing option value")?)?;
+                endpoint.channel_0_remote_port =
+                    parse_port(args.get(index).ok_or("missing option value")?)?;
                 index += 1;
             }
             "--channel-1-local-port" => {
                 index += 1;
-                channel_1_local_port = parse_port(args.get(index).ok_or("missing option value")?)?;
+                endpoint.channel_1_local_port =
+                    parse_port(args.get(index).ok_or("missing option value")?)?;
                 index += 1;
             }
             "--channel-1-remote-port" => {
                 index += 1;
-                channel_1_remote_port = parse_port(args.get(index).ok_or("missing option value")?)?;
+                endpoint.channel_1_remote_port =
+                    parse_port(args.get(index).ok_or("missing option value")?)?;
                 index += 1;
             }
             "--local-id" => {
                 index += 1;
-                sender_id = parse_node_id(args.get(index).ok_or("missing option value")?)?;
+                endpoint.sender_id = parse_node_id(args.get(index).ok_or("missing option value")?)?;
                 index += 1;
             }
             "--remote-id" => {
                 index += 1;
-                remote_id = parse_node_id(args.get(index).ok_or("missing option value")?)?;
+                endpoint.remote_id = parse_node_id(args.get(index).ok_or("missing option value")?)?;
                 index += 1;
             }
             _ => return Err("invalid option"),
         }
     }
 
-    if channel_0_local_port == channel_1_local_port {
+    if endpoint.channel_0_local_port == endpoint.channel_1_local_port {
         return Err("duplicate local ports");
     }
-    if sender_id == remote_id {
+    if endpoint.sender_id == endpoint.remote_id {
         return Err("invalid node ids");
     }
 
     match args[1].as_str() {
         "A" => Ok(NodeSettings {
             role: NodeRole::A,
-            local_addr_a: socket_addr(local_ip, channel_0_local_port),
-            remote_addr_a: socket_addr(remote_ip, channel_0_remote_port),
-            local_addr_b: socket_addr(local_ip, channel_1_local_port),
-            remote_addr_b: socket_addr(remote_ip, channel_1_remote_port),
-            sender_id,
-            remote_id,
+            profile,
+            local_addr_a: socket_addr(local_ip, endpoint.channel_0_local_port),
+            remote_addr_a: socket_addr(remote_ip, endpoint.channel_0_remote_port),
+            local_addr_b: socket_addr(local_ip, endpoint.channel_1_local_port),
+            remote_addr_b: socket_addr(remote_ip, endpoint.channel_1_remote_port),
+            sender_id: endpoint.sender_id,
+            remote_id: endpoint.remote_id,
             trace_wire,
+            run_seconds,
+            run_seconds_supplied,
         }),
         "B" => Ok(NodeSettings {
             role: NodeRole::B,
-            local_addr_a: socket_addr(local_ip, channel_0_local_port),
-            remote_addr_a: socket_addr(remote_ip, channel_0_remote_port),
-            local_addr_b: socket_addr(local_ip, channel_1_local_port),
-            remote_addr_b: socket_addr(remote_ip, channel_1_remote_port),
-            sender_id,
-            remote_id,
+            profile,
+            local_addr_a: socket_addr(local_ip, endpoint.channel_0_local_port),
+            remote_addr_a: socket_addr(remote_ip, endpoint.channel_0_remote_port),
+            local_addr_b: socket_addr(local_ip, endpoint.channel_1_local_port),
+            remote_addr_b: socket_addr(remote_ip, endpoint.channel_1_remote_port),
+            sender_id: endpoint.sender_id,
+            remote_id: endpoint.remote_id,
             trace_wire,
+            run_seconds,
+            run_seconds_supplied,
         }),
         _ => Err("invalid role"),
     }
+}
+
+fn academic_defaults(role: NodeRole) -> EndpointDefaults {
+    match role {
+        NodeRole::A => EndpointDefaults {
+            channel_0_local_port: 5000,
+            channel_0_remote_port: 5001,
+            channel_1_local_port: 6000,
+            channel_1_remote_port: 6001,
+            sender_id: 0x1234,
+            remote_id: 0x5678,
+        },
+        NodeRole::B => EndpointDefaults {
+            channel_0_local_port: 5001,
+            channel_0_remote_port: 5000,
+            channel_1_local_port: 6001,
+            channel_1_remote_port: 6000,
+            sender_id: 0x5678,
+            remote_id: 0x1234,
+        },
+    }
+}
+
+fn parse_runtime_profile(value: &str) -> Result<RuntimeProfile, &'static str> {
+    match value {
+        "academic" => Ok(RuntimeProfile::Academic),
+        "librasta-local" => Ok(RuntimeProfile::LibrastaLocal),
+        _ => Err("invalid profile"),
+    }
+}
+
+fn apply_profile_defaults(
+    profile: RuntimeProfile,
+    role: NodeRole,
+    endpoint: &mut EndpointDefaults,
+) {
+    if profile != RuntimeProfile::LibrastaLocal {
+        return;
+    }
+
+    *endpoint = match role {
+        NodeRole::A => EndpointDefaults {
+            channel_0_local_port: 9998,
+            channel_0_remote_port: 8888,
+            channel_1_local_port: 9999,
+            channel_1_remote_port: 8889,
+            sender_id: 0x60,
+            remote_id: 0x61,
+        },
+        NodeRole::B => EndpointDefaults {
+            channel_0_local_port: 8888,
+            channel_0_remote_port: 9998,
+            channel_1_local_port: 8889,
+            channel_1_remote_port: 9999,
+            sender_id: 0x61,
+            remote_id: 0x60,
+        },
+    };
 }
 
 fn parse_ip(value: &str) -> Result<IpAddr, &'static str> {
@@ -179,6 +261,14 @@ fn parse_node_id(value: &str) -> Result<u32, &'static str> {
         return Err("invalid node id");
     }
     Ok(id)
+}
+
+fn parse_run_seconds(value: &str) -> Result<u64, &'static str> {
+    let seconds = value.parse::<u64>().map_err(|_| "invalid run seconds")?;
+    if seconds == 0 || seconds > MAX_RUN_SECONDS {
+        return Err("invalid run seconds");
+    }
+    Ok(seconds)
 }
 
 #[derive(Clone)]
@@ -249,7 +339,37 @@ fn decode_wire_summary(bytes: &[u8]) -> String {
         let srl_type = u16::from_le_bytes([bytes[10], bytes[11]]);
         summary.push_str(&format!(" srl_len={srl_len} srl_type={srl_type}"));
     }
+    if bytes.len() >= 36 {
+        let receiver = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+        let sender = u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        let sequence = u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+        let confirmed_sequence = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+        let timestamp = u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]);
+        let confirmed_timestamp = u32::from_le_bytes([bytes[32], bytes[33], bytes[34], bytes[35]]);
+        summary.push_str(&format!(
+            " receiver={receiver} sender={sender} sn={sequence} cs={confirmed_sequence} ts={timestamp:#010x} cts={confirmed_timestamp:#010x}"
+        ));
+    }
     summary
+}
+
+fn log_timestamp_trace(event: TimestampTraceEvent) {
+    eprintln!(
+        "timestamp raw_peer_ts={:#010x} learned_peer_offset={} normalized_ts={:#010x} local_ts={:#010x} local_receive_deadline={} confirmed_ts={:#010x} rejection={:?}",
+        event.raw_peer_timestamp,
+        event
+            .learned_peer_offset
+            .map(|value| format!("{value:#010x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        event.normalized_peer_timestamp,
+        event.local_timestamp,
+        event
+            .local_receive_deadline
+            .map(|value| format!("{value:#010x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        event.confirmed_timestamp,
+        event.rejection
+    );
 }
 
 fn hex_bytes(bytes: &[u8]) -> String {
@@ -270,7 +390,10 @@ fn main() {
     let settings = match parse_node_settings(&args) {
         Ok(settings) => settings,
         Err("missing arguments") => {
-            println!("Usage: {} <A|B> <remote_ip> [interop options]", args[0]);
+            println!(
+                "Usage: {} <A|B> <remote_ip> [--profile academic|librasta-local] [--run-seconds N] [interop options]",
+                args[0]
+            );
             return;
         }
         Err(_) => {
@@ -287,7 +410,9 @@ fn main() {
     println!("Starting node {}", mode);
     println!("Local ID: {}", settings.sender_id);
     println!("Remote ID: {}", settings.remote_id);
+    println!("Profile: {:?}", settings.profile);
     println!("Wire tracing: {}", settings.trace_wire);
+    println!("Run seconds: {}", settings.run_seconds);
     println!(
         "Channel A: {} -> {}",
         settings.local_addr_a, settings.remote_addr_a
@@ -333,7 +458,10 @@ fn main() {
 
     // Test-only interoperability profile. Not approved for production or
     // railway operational use.
-    let profile = DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE;
+    let profile = match settings.profile {
+        RuntimeProfile::Academic => DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE,
+        RuntimeProfile::LibrastaLocal => LIBRASTA_LOCAL_PROFILE,
+    };
     if let Err(error) = profile.validate() {
         eprintln!("Invalid interoperability-test profile: {:?}", error);
         return;
@@ -341,9 +469,22 @@ fn main() {
     let config = RastaConfig {
         sender_id: settings.sender_id,
         remote_id: settings.remote_id,
-        safety_code: SafetyCodeConfig::md4_low8(profile.md4_initial_value),
+        safety_code: match profile.safety_code_length {
+            SafetyCodeLength::None => SafetyCodeConfig::none(),
+            SafetyCodeLength::Md4Lower8 => SafetyCodeConfig::md4_low8(profile.md4_initial_value),
+            SafetyCodeLength::Md4Full16 => SafetyCodeConfig {
+                mode: rasta_core::connection::safety_code::SafetyCodeMode::Md4Full16,
+                md4_initial_value: profile.md4_initial_value,
+            },
+        },
         redundancy: RedundancyConfig {
-            check_code: RedundancyCheckCode::OptionB,
+            check_code: match profile.redundancy_crc {
+                RedundancyCrc::OptionA => RedundancyCheckCode::OptionA,
+                RedundancyCrc::OptionB => RedundancyCheckCode::OptionB,
+                RedundancyCrc::OptionC => RedundancyCheckCode::OptionC,
+                RedundancyCrc::OptionD => RedundancyCheckCode::OptionD,
+                RedundancyCrc::OptionE => RedundancyCheckCode::OptionE,
+            },
             t_seq_ms: profile.t_seq_ms,
         },
         t_max: profile.t_max_ms,
@@ -351,6 +492,8 @@ fn main() {
         heartbeat_interval_ms: profile.t_h_ms,
         n_send_max: profile.n_send_max as u16,
         mwa: profile.mwa as u16,
+        allow_unsafe_no_checksums: settings.profile == RuntimeProfile::LibrastaLocal,
+        timestamp_compatibility: profile.timestamp_compatibility,
     };
 
     let mut api = match RastaService::new(transport_a, transport_b, StdClock::new(), config) {
@@ -373,7 +516,9 @@ fn main() {
 
     let mut last_state = api.status();
     let mut data_sent = false;
-    let start_time = std::time::Instant::now();
+    let start_time = Instant::now();
+    let mut up_since: Option<Instant> = None;
+    let mut next_runtime_report = Duration::from_secs(10);
 
     loop {
         if let Err(e) = api.poll() {
@@ -381,13 +526,34 @@ fn main() {
             while let Some(diagnostic) = api.take_diagnostic() {
                 eprintln!("RaSTA diagnostic: {:?}", diagnostic);
             }
+            if settings.trace_wire {
+                while let Some(event) = api.take_timestamp_trace() {
+                    log_timestamp_trace(event);
+                }
+            }
             break;
+        }
+        if settings.trace_wire {
+            while let Some(event) = api.take_timestamp_trace() {
+                log_timestamp_trace(event);
+            }
         }
 
         let current_state = api.status();
+        if current_state == ConnectionStatus::Up && up_since.is_none() {
+            up_since = Some(Instant::now());
+        }
         if current_state != last_state {
             println!("State transition: {:?} -> {:?}", last_state, current_state);
             last_state = current_state;
+        }
+
+        if let Some(connected_since) = up_since {
+            let connected_elapsed = connected_since.elapsed();
+            if connected_elapsed >= next_runtime_report {
+                println!("Connected for {} seconds", connected_elapsed.as_secs());
+                next_runtime_report = next_runtime_report.saturating_add(Duration::from_secs(10));
+            }
         }
 
         if settings.role == NodeRole::B && api.has_received_data() {
@@ -410,10 +576,15 @@ fn main() {
             data_sent = true;
         }
 
-        if settings.role == NodeRole::A
-            && data_sent
-            && start_time.elapsed() > Duration::from_secs(5)
-        {
+        let selected_duration_expired = if settings.run_seconds_supplied {
+            up_since.is_some_and(|connected_since| {
+                connected_since.elapsed() >= Duration::from_secs(settings.run_seconds)
+            })
+        } else {
+            start_time.elapsed() > Duration::from_secs(settings.run_seconds)
+        };
+
+        if settings.role == NodeRole::A && data_sent && selected_duration_expired {
             println!("Graceful disconnect...");
             if let Err(error) = api.close_connection() {
                 eprintln!("Failed to disconnect: {:?}", error);
@@ -431,7 +602,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeRole, decode_wire_summary, hex_bytes, parse_node_settings};
+    use super::{
+        DEFAULT_RUN_SECONDS, NodeRole, RuntimeProfile, decode_wire_summary, hex_bytes,
+        parse_node_settings,
+    };
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
@@ -457,6 +631,7 @@ mod tests {
     fn parses_node_a_and_b_port_assignments() {
         let a = parse_node_settings(&args(&["rasta-node", "A", "127.0.0.1"])).unwrap();
         assert_eq!(a.role, NodeRole::A);
+        assert_eq!(a.profile, RuntimeProfile::Academic);
         assert_eq!(a.local_addr_a, "0.0.0.0:5000");
         assert_eq!(a.remote_addr_a, "127.0.0.1:5001");
         assert_eq!(a.local_addr_b, "0.0.0.0:6000");
@@ -464,9 +639,12 @@ mod tests {
         assert_eq!(a.sender_id, 0x1234);
         assert_eq!(a.remote_id, 0x5678);
         assert!(!a.trace_wire);
+        assert_eq!(a.run_seconds, DEFAULT_RUN_SECONDS);
+        assert!(!a.run_seconds_supplied);
 
         let b = parse_node_settings(&args(&["rasta-node", "B", "127.0.0.1"])).unwrap();
         assert_eq!(b.role, NodeRole::B);
+        assert_eq!(b.profile, RuntimeProfile::Academic);
         assert_eq!(b.local_addr_a, "0.0.0.0:5001");
         assert_eq!(b.remote_addr_a, "127.0.0.1:5000");
         assert_eq!(b.local_addr_b, "0.0.0.0:6001");
@@ -474,6 +652,23 @@ mod tests {
         assert_eq!(b.sender_id, a.remote_id);
         assert_eq!(b.remote_id, a.sender_id);
         assert!(!b.trace_wire);
+        assert_eq!(b.run_seconds, DEFAULT_RUN_SECONDS);
+        assert!(!b.run_seconds_supplied);
+    }
+
+    #[test]
+    fn parses_valid_run_seconds() {
+        let settings = parse_node_settings(&args(&[
+            "rasta-node",
+            "A",
+            "127.0.0.1",
+            "--run-seconds",
+            "40",
+        ]))
+        .unwrap();
+
+        assert_eq!(settings.run_seconds, 40);
+        assert!(settings.run_seconds_supplied);
     }
 
     #[test]
@@ -507,6 +702,41 @@ mod tests {
         assert_eq!(settings.remote_addr_b, "127.0.0.1:16001");
         assert_eq!(settings.sender_id, 0x1111);
         assert_eq!(settings.remote_id, 8738);
+    }
+
+    #[test]
+    fn parses_librasta_local_profile_defaults() {
+        let a = parse_node_settings(&args(&[
+            "rasta-node",
+            "A",
+            "127.0.0.1",
+            "--profile",
+            "librasta-local",
+        ]))
+        .unwrap();
+        assert_eq!(a.profile, RuntimeProfile::LibrastaLocal);
+        assert_eq!(a.local_addr_a, "0.0.0.0:9998");
+        assert_eq!(a.remote_addr_a, "127.0.0.1:8888");
+        assert_eq!(a.local_addr_b, "0.0.0.0:9999");
+        assert_eq!(a.remote_addr_b, "127.0.0.1:8889");
+        assert_eq!(a.sender_id, 0x60);
+        assert_eq!(a.remote_id, 0x61);
+
+        let b = parse_node_settings(&args(&[
+            "rasta-node",
+            "B",
+            "127.0.0.1",
+            "--profile",
+            "librasta-local",
+        ]))
+        .unwrap();
+        assert_eq!(b.profile, RuntimeProfile::LibrastaLocal);
+        assert_eq!(b.local_addr_a, "0.0.0.0:8888");
+        assert_eq!(b.remote_addr_a, "127.0.0.1:9998");
+        assert_eq!(b.local_addr_b, "0.0.0.0:8889");
+        assert_eq!(b.remote_addr_b, "127.0.0.1:9999");
+        assert_eq!(b.sender_id, 0x61);
+        assert_eq!(b.remote_id, 0x60);
     }
 
     #[test]
@@ -552,6 +782,50 @@ mod tests {
                 "7"
             ])),
             Err("invalid node ids")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&[
+                "rasta-node",
+                "A",
+                "127.0.0.1",
+                "--profile",
+                "unknown"
+            ])),
+            Err("invalid profile")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&["rasta-node", "A", "127.0.0.1", "--run-seconds"])),
+            Err("missing option value")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&[
+                "rasta-node",
+                "A",
+                "127.0.0.1",
+                "--run-seconds",
+                "0"
+            ])),
+            Err("invalid run seconds")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&[
+                "rasta-node",
+                "A",
+                "127.0.0.1",
+                "--run-seconds",
+                "forty"
+            ])),
+            Err("invalid run seconds")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&[
+                "rasta-node",
+                "A",
+                "127.0.0.1",
+                "--run-seconds",
+                "86401"
+            ])),
+            Err("invalid run seconds")
         );
     }
 

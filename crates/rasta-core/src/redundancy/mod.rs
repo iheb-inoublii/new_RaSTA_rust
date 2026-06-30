@@ -12,6 +12,7 @@ pub use crc::{RedundancyCrc, calculate, check_code_len};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RedundancyCheckCode {
     None,
+    OptionA,
     OptionB,
     OptionC,
     OptionD,
@@ -36,7 +37,7 @@ impl Default for RedundancyConfig {
 impl RedundancyConfig {
     pub(crate) fn check_code_len(&self) -> usize {
         match self.check_code {
-            RedundancyCheckCode::None => 0,
+            RedundancyCheckCode::None | RedundancyCheckCode::OptionA => 0,
             RedundancyCheckCode::OptionB | RedundancyCheckCode::OptionC => 4,
             RedundancyCheckCode::OptionD | RedundancyCheckCode::OptionE => 2,
         }
@@ -45,6 +46,7 @@ impl RedundancyConfig {
     pub(crate) fn crc_option(&self) -> Option<RedundancyCrc> {
         match self.check_code {
             RedundancyCheckCode::None => None,
+            RedundancyCheckCode::OptionA => Some(RedundancyCrc::OptionA),
             RedundancyCheckCode::OptionB => Some(RedundancyCrc::OptionB),
             RedundancyCheckCode::OptionC => Some(RedundancyCrc::OptionC),
             RedundancyCheckCode::OptionD => Some(RedundancyCrc::OptionD),
