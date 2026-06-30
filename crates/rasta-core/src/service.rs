@@ -16,13 +16,13 @@ pub enum ConnectionStatus {
 impl From<RastaState> for ConnectionStatus {
     fn from(state: RastaState) -> Self {
         match state {
+            RastaState::Closed => Self::Down,
             RastaState::Down => Self::Opening,
             RastaState::Start => Self::Opening,
             RastaState::Up => Self::Up,
             RastaState::RetransmissionRequested | RastaState::RetransmissionRunning => {
                 Self::Retransmission
             }
-            RastaState::Closed => Self::Closing,
         }
     }
 }
@@ -98,5 +98,36 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
 
     pub fn status(&self) -> ConnectionStatus {
         self.connection.state_machine.current_state.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConnectionStatus;
+    use crate::connection::state_machine::RastaState;
+
+    #[test]
+    fn public_status_maps_final_closed_state_to_down() {
+        assert_eq!(
+            ConnectionStatus::from(RastaState::Closed),
+            ConnectionStatus::Down
+        );
+        assert_eq!(
+            ConnectionStatus::from(RastaState::Down),
+            ConnectionStatus::Opening
+        );
+        assert_eq!(
+            ConnectionStatus::from(RastaState::Start),
+            ConnectionStatus::Opening
+        );
+        assert_eq!(ConnectionStatus::from(RastaState::Up), ConnectionStatus::Up);
+        assert_eq!(
+            ConnectionStatus::from(RastaState::RetransmissionRequested),
+            ConnectionStatus::Retransmission
+        );
+        assert_eq!(
+            ConnectionStatus::from(RastaState::RetransmissionRunning),
+            ConnectionStatus::Retransmission
+        );
     }
 }

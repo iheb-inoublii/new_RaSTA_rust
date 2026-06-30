@@ -191,7 +191,6 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             return Err(ConnectionError::ProtocolViolation);
         }
         self.transition(RastaState::Down)?;
-        self.heartbeat.restart(self.clock.now());
         // DIN 5.5.12: the lower identification is the client.
         if self.sender_id > self.remote_id {
             return Ok(());
@@ -234,27 +233,8 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
 
     pub fn process(&mut self) -> Result<(), ConnectionError> {
         let local_now = self.clock.now();
-        if self
-            .timeliness_deadline
-            .is_some_and(|deadline| local_now.has_reached(deadline))
-        {
-            self.record_diagnostic(
-                DiagnosticKind::ConnectionTimeout,
-                local_now.wrapping_millis(),
-            );
-            self.disconnect_with_reason(DisconnectReason::IncomingMessageTimeout)?;
-            return Err(ConnectionError::SafetyTimeout);
-        }
-        if self.heartbeat.is_due(local_now) {
-            if !matches!(
-                self.state_machine.current_state,
-                RastaState::Closed | RastaState::Down
-            ) {
-                self.send_packet(PacketType::Heartbeat, &[])?;
-            }
-            self.heartbeat.restart(local_now);
-        }
-
+        let local_timestamp = self.clock.protocol_timestamp();
+        let heartbeat_due_at_poll_start = self.heartbeat.is_due(local_now);
         for _ in 0..32 {
             let receive_result = self.redundancy.receive_at(&mut self.rx_buffer, local_now);
             self.record_channel_status_transitions();
@@ -268,7 +248,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                 .ok_or(ConnectionError::BufferFull)?;
             let parse_res = Packet::parse(rx_slice, &self.safety_code);
             match parse_res {
-                Ok(packet) => self.handle_packet(packet)?,
+                Ok(packet) => self.handle_packet(packet, local_now, local_timestamp)?,
                 Err(PacketError::ChecksumMismatch) => {
                     self.record_diagnostic(DiagnosticKind::SafetyCodeError, 1);
                     continue;
@@ -294,11 +274,31 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             }
         }
 
+        if self
+            .timeliness_deadline
+            .is_some_and(|deadline| local_now.has_reached(deadline))
+        {
+            self.record_diagnostic(
+                DiagnosticKind::ConnectionTimeout,
+                local_now.wrapping_millis(),
+            );
+            self.disconnect_with_reason(DisconnectReason::IncomingMessageTimeout)?;
+            return Err(ConnectionError::SafetyTimeout);
+        }
+        if heartbeat_due_at_poll_start && self.heartbeat_send_active() {
+            self.send_packet(PacketType::Heartbeat, &[])?;
+        }
+
         self.flush_application_tx()?;
         Ok(())
     }
 
-    fn handle_packet(&mut self, packet: Packet) -> Result<(), ConnectionError> {
+    fn handle_packet(
+        &mut self,
+        packet: Packet,
+        local_now: MonotonicInstant,
+        local_timestamp: ProtocolTimestamp,
+    ) -> Result<(), ConnectionError> {
         // 1. Check IDs
         if self.state_machine.current_state != RastaState::Down {
             if packet.receiver_id != self.sender_id || packet.sender_id != self.remote_id {
@@ -317,8 +317,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             }
         }
 
-        let local_now = self.clock.now();
-        let timeliness_decision = self.validate_timeliness(&packet)?;
+        let timeliness_decision = self.validate_timeliness(&packet, local_timestamp)?;
         let peer_confirmation = self.validate_peer_confirmation(&packet)?;
 
         match packet.packet_type {
@@ -358,8 +357,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         // message into the next outbound PDU; only time-out related PDUs are
         // analysed by the adaptive monitor.
         self.last_received_timestamp = ProtocolTimestamp::from_wire_millis(packet.timestamp);
-        self.apply_timeliness_decision(timeliness_decision, local_now);
-        self.heartbeat.restart(local_now);
+        self.refresh_receive_supervision(timeliness_decision, local_now);
 
         match self.state_machine.current_state {
             RastaState::Down if packet.packet_type == PacketType::ConnectionRequest => {
@@ -367,7 +365,6 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                 self.sequence.accept_initial_rx(packet.sequence_number);
                 self.apply_connection_payload(&packet)?;
                 self.transition(RastaState::Start)?;
-                self.heartbeat.restart(local_now);
                 let payload = self.connection_payload();
                 self.send_packet(
                     PacketType::ConnectionResponse,
@@ -383,16 +380,13 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                     }
                     self.sequence.accept_initial_rx(packet.sequence_number);
                     self.apply_connection_payload(&packet)?;
-                    self.transition(RastaState::Up)?;
-                    self.error_counters.reset();
-                    self.send_packet(PacketType::Heartbeat, &[])?;
+                    self.enter_up()?;
                 }
                 PacketType::Heartbeat => {
                     if self.is_client {
                         return self.reject_unexpected_packet();
                     }
-                    self.transition(RastaState::Up)?;
-                    self.error_counters.reset();
+                    self.enter_up()?;
                 }
                 PacketType::ConnectionRequest => return self.reject_unexpected_packet(),
                 _ => {
@@ -533,6 +527,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
         self.record_channel_status_transitions();
         send_result.map_err(ConnectionError::Transport)?;
+        if self.heartbeat_send_active() {
+            self.restart_send_heartbeat_timer(self.clock.now());
+        }
         self.last_tx_sequence = Some(packet.sequence_number);
 
         if p_type == PacketType::Data && !self.retransmission.store(packet) {
@@ -583,6 +580,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
         self.record_channel_status_transitions();
         send_result.map_err(ConnectionError::Transport)?;
+        if self.heartbeat_send_active() {
+            self.restart_send_heartbeat_timer(self.clock.now());
+        }
         Ok(())
     }
 
@@ -625,6 +625,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
         self.record_channel_status_transitions();
         send_result.map_err(ConnectionError::Transport)?;
+        if self.heartbeat_send_active() {
+            self.restart_send_heartbeat_timer(self.clock.now());
+        }
         if update_last_tx {
             self.last_tx_sequence = Some(sequence_number);
         }
@@ -720,9 +723,20 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         self.app_tx_count
     }
 
+    #[cfg(test)]
+    pub(crate) fn timeliness_deadline_for_test(&self) -> Option<MonotonicInstant> {
+        self.timeliness_deadline
+    }
+
     fn start_timeliness_monitor(&mut self, now: MonotonicInstant) {
         self.confirmed_timestamp_reference = Some(self.clock.protocol_timestamp());
         self.timeliness_deadline = Some(now.deadline_after(self.t_max_duration));
+    }
+
+    fn enter_up(&mut self) -> Result<(), ConnectionError> {
+        self.transition(RastaState::Up)?;
+        self.error_counters.reset();
+        self.send_packet(PacketType::Heartbeat, &[])
     }
 
     fn stop_timeliness_monitor(&mut self) {
@@ -733,6 +747,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
     fn validate_timeliness(
         &mut self,
         packet: &Packet,
+        local_timestamp: ProtocolTimestamp,
     ) -> Result<Option<ConfirmedTimestampDecision>, ConnectionError> {
         if !matches!(
             packet.packet_type,
@@ -741,7 +756,6 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             return Ok(None);
         }
 
-        let local_timestamp = self.clock.protocol_timestamp();
         let supervisor = TimeSupervisor {
             t_max: self.t_max_duration,
             future_tolerance: DurationMs::from_millis(TimeSupervisor::DEFAULT_FUTURE_TOLERANCE_MS),
@@ -789,7 +803,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         Ok(())
     }
 
-    fn apply_timeliness_decision(
+    fn refresh_receive_supervision(
         &mut self,
         decision: Option<ConfirmedTimestampDecision>,
         now: MonotonicInstant,
@@ -798,9 +812,20 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             return;
         };
         self.confirmed_timestamp_reference = Some(decision.confirmed_timestamp);
-        self.timeliness_deadline = Some(now.deadline_after(DurationMs::from_millis(
-            self.t_max_duration.as_millis() - decision.round_trip.as_millis(),
-        )));
+        self.timeliness_deadline = Some(now.deadline_after(self.t_max_duration));
+    }
+
+    fn restart_send_heartbeat_timer(&mut self, now: MonotonicInstant) {
+        self.heartbeat.restart(now);
+    }
+
+    fn heartbeat_send_active(&self) -> bool {
+        matches!(
+            self.state_machine.current_state,
+            RastaState::Up
+                | RastaState::RetransmissionRequested
+                | RastaState::RetransmissionRunning
+        )
     }
 
     pub fn receive_data(&mut self, output: &mut [u8]) -> Result<usize, ConnectionError> {

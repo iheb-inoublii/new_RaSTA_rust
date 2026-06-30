@@ -228,6 +228,40 @@ mod cases {
     }
 
     #[derive(Clone)]
+    struct SplitClock {
+        monotonic: Rc<Cell<u32>>,
+        protocol: Rc<Cell<u32>>,
+    }
+
+    impl SplitClock {
+        fn new(monotonic: u32, protocol: u32) -> Self {
+            Self {
+                monotonic: Rc::new(Cell::new(monotonic)),
+                protocol: Rc::new(Cell::new(protocol)),
+            }
+        }
+
+        fn advance(&self, duration: u32) {
+            self.monotonic
+                .set(self.monotonic.get().wrapping_add(duration));
+            self.protocol
+                .set(self.protocol.get().wrapping_add(duration));
+        }
+    }
+
+    impl MonotonicClock for SplitClock {
+        fn now(&self) -> MonotonicInstant {
+            MonotonicInstant::from_wrapping_millis(self.monotonic.get())
+        }
+    }
+
+    impl ProtocolTimestampSource for SplitClock {
+        fn protocol_timestamp(&self) -> ProtocolTimestamp {
+            ProtocolTimestamp::from_wire_millis(self.protocol.get())
+        }
+    }
+
+    #[derive(Clone)]
     struct FakeClock(Rc<Cell<u32>>);
 
     impl FakeClock {
@@ -396,6 +430,96 @@ mod cases {
         data.payload[..2].copy_from_slice(&(payload.len() as u16).to_le_bytes());
         data.payload[2..2 + payload.len()].copy_from_slice(payload);
         data
+    }
+
+    fn clear_network_channels(network: &Rc<RefCell<TestNetwork>>, channels: &[usize]) {
+        let mut network = network.borrow_mut();
+        for channel in channels {
+            while network.drop_next(*channel) {}
+        }
+    }
+
+    fn network_has_packet_type(
+        network: &Rc<RefCell<TestNetwork>>,
+        channels: &[usize],
+        safety: &SafetyCodeConfig,
+        packet_type: PacketType,
+    ) -> bool {
+        let network = network.borrow();
+        for channel in channels {
+            for offset in 0..network.count[*channel] {
+                let index = (network.head[*channel] + offset) % 32;
+                let Some(frame) = network.frames[*channel][index] else {
+                    continue;
+                };
+                let Some(payload_end) = frame.len.checked_sub(4) else {
+                    continue;
+                };
+                let Some(payload) = frame.bytes.get(
+                    RedundancyLayer::<LinkedTransport, LinkedTransport>::HEADER_SIZE..payload_end,
+                ) else {
+                    continue;
+                };
+                if Packet::parse(payload, safety)
+                    .is_ok_and(|packet| packet.packet_type == packet_type)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn network_packet_type_count(
+        network: &Rc<RefCell<TestNetwork>>,
+        channels: &[usize],
+        safety: &SafetyCodeConfig,
+        packet_type: PacketType,
+    ) -> usize {
+        let network = network.borrow();
+        let mut count = 0;
+        for channel in channels {
+            for offset in 0..network.count[*channel] {
+                let index = (network.head[*channel] + offset) % 32;
+                let Some(frame) = network.frames[*channel][index] else {
+                    continue;
+                };
+                let Some(payload_end) = frame.len.checked_sub(4) else {
+                    continue;
+                };
+                let Some(payload) = frame.bytes.get(
+                    RedundancyLayer::<LinkedTransport, LinkedTransport>::HEADER_SIZE..payload_end,
+                ) else {
+                    continue;
+                };
+                if Packet::parse(payload, safety)
+                    .is_ok_and(|packet| packet.packet_type == packet_type)
+                {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    fn network_head_packet_type(
+        network: &Rc<RefCell<TestNetwork>>,
+        channel: usize,
+        safety: &SafetyCodeConfig,
+    ) -> Option<PacketType> {
+        let network = network.borrow();
+        let frame = network.frames[channel][network.head[channel]]?;
+        let payload_end = frame.len.checked_sub(4)?;
+        let payload = frame
+            .bytes
+            .get(RedundancyLayer::<LinkedTransport, LinkedTransport>::HEADER_SIZE..payload_end)?;
+        Packet::parse(payload, safety)
+            .ok()
+            .map(|packet| packet.packet_type)
+    }
+
+    fn instant_is_later(left: MonotonicInstant, right: MonotonicInstant) -> bool {
+        left != right && left.elapsed_since(right).as_millis() < 0x8000_0000
     }
 
     #[test]
@@ -721,6 +845,29 @@ mod cases {
         );
         assert_eq!(
             supervisor.validate(timestamp(0), timestamp(0x8000_0000)),
+            Err(TimeSupervisionError::TimestampTooFarInFuture)
+        );
+    }
+
+    #[test]
+    fn unsynchronized_protocol_timestamp_offsets_hit_future_tolerance_boundary() {
+        let supervisor = TimeSupervisor::new(2_000);
+        let timestamp = ProtocolTimestamp::from_wire_millis;
+
+        assert!(supervisor.validate(timestamp(0), timestamp(100)).is_ok());
+        for offset in [999u32, 1_000, 1_001, 5_000] {
+            assert_eq!(
+                supervisor.validate(timestamp(0), timestamp(offset)),
+                Err(TimeSupervisionError::TimestampTooFarInFuture)
+            );
+        }
+        assert!(
+            supervisor
+                .validate(timestamp(u32::MAX - 50), timestamp(49))
+                .is_ok()
+        );
+        assert_eq!(
+            supervisor.validate(timestamp(u32::MAX - 50), timestamp(50)),
             Err(TimeSupervisionError::TimestampTooFarInFuture)
         );
     }
@@ -1134,6 +1281,211 @@ mod cases {
     }
 
     #[test]
+    fn active_open_does_not_emit_heartbeat_before_connection_response() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Start);
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::ConnectionRequest
+            ),
+            2
+        );
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::Heartbeat
+            ),
+            0
+        );
+
+        for now in [500u32, 1_000, 1_500] {
+            time.set(now);
+            client.process().unwrap();
+            assert_eq!(client.state_machine.current_state, RastaState::Start);
+            assert_eq!(
+                network_packet_type_count(
+                    &network,
+                    &[2, 3],
+                    &client.safety_code,
+                    PacketType::Heartbeat
+                ),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn active_heartbeat_starts_only_after_valid_connection_response() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::Heartbeat
+            ),
+            0
+        );
+
+        client.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::Heartbeat
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn passive_rejects_heartbeat_before_connection_request() {
+        let clock = FakeClock::new(0);
+        let mut server = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock,
+            config(2, 1),
+        )
+        .unwrap();
+        server.connect().unwrap();
+
+        let mut heartbeat = ack_heartbeat(0, 0, 0);
+        heartbeat.receiver_id = 2;
+        heartbeat.sender_id = 1;
+        server.redundancy = RedundancyLayer::with_config(
+            receive_packet_transport(&heartbeat, &server.safety_code),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+
+        assert!(matches!(
+            server.process(),
+            Err(ConnectionError::UnexpectedPacket)
+        ));
+        assert_eq!(server.state_machine.current_state, RastaState::Down);
+    }
+
+    #[test]
+    fn complete_handshake_wire_order_is_request_response_then_heartbeats() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        assert_eq!(
+            network_head_packet_type(&network, 2, &client.safety_code),
+            Some(PacketType::ConnectionRequest)
+        );
+
+        server.connect().unwrap();
+        server.process().unwrap();
+        assert_eq!(
+            network_head_packet_type(&network, 0, &server.safety_code),
+            Some(PacketType::ConnectionResponse)
+        );
+
+        client.process().unwrap();
+        assert_eq!(
+            network_head_packet_type(&network, 2, &client.safety_code),
+            Some(PacketType::Heartbeat)
+        );
+
+        server.process().unwrap();
+        assert_eq!(
+            network_head_packet_type(&network, 0, &server.safety_code),
+            Some(PacketType::Heartbeat)
+        );
+
+        client.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(server.state_machine.current_state, RastaState::Up);
+    }
+
+    #[test]
+    fn stale_pre_handshake_heartbeat_cannot_establish_connection() {
+        let clock = FakeClock::new(0);
+        let mut client = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock,
+            config(1, 2),
+        )
+        .unwrap();
+        client.connect().unwrap();
+
+        let mut heartbeat = ack_heartbeat(0, 0, 0);
+        heartbeat.receiver_id = 1;
+        heartbeat.sender_id = 2;
+        client.redundancy = RedundancyLayer::with_config(
+            receive_packet_transport(&heartbeat, &client.safety_code),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+
+        assert!(matches!(
+            client.process(),
+            Err(ConnectionError::UnexpectedPacket)
+        ));
+        assert_ne!(client.state_machine.current_state, RastaState::Up);
+    }
+
+    #[test]
     fn connection_uses_injected_random_initial_sequence() {
         let mut random = DeterministicRandom(0xa5a5_5a5a);
         let connection = RastaConnection::try_new_with_random(
@@ -1229,15 +1581,458 @@ mod cases {
 
         // Exercise several heartbeat periods beyond T_max. A stale confirmed
         // timestamp would make either peer enter SafetyTimeout here.
-        for now in [300u32, 600, 900, 1_200, 1_500, 1_800, 2_100] {
+        for now in [300u32, 600, 900, 1_200, 1_500, 1_800, 1_999] {
             time.set(now);
-            client.process().unwrap();
-            server.process().unwrap();
-            client.process().unwrap();
-            server.process().unwrap();
+            client
+                .process()
+                .unwrap_or_else(|error| panic!("client first poll failed at {now}: {error:?}"));
+            server
+                .process()
+                .unwrap_or_else(|error| panic!("server first poll failed at {now}: {error:?}"));
+            client
+                .process()
+                .unwrap_or_else(|error| panic!("client second poll failed at {now}: {error:?}"));
+            server
+                .process()
+                .unwrap_or_else(|error| panic!("server second poll failed at {now}: {error:?}"));
             assert_eq!(client.state_machine.current_state, RastaState::Up);
             assert_eq!(server.state_machine.current_state, RastaState::Up);
         }
+    }
+
+    #[test]
+    fn active_client_path_schedules_and_emits_heartbeat_after_up() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::Heartbeat
+            ),
+            2
+        );
+
+        clear_network_channels(&network, &[2, 3]);
+        time.set(500);
+        client.process().unwrap();
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::Heartbeat
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn passive_server_path_schedules_and_emits_heartbeat_after_up() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+
+        assert_eq!(server.state_machine.current_state, RastaState::Up);
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[0, 1],
+                &server.safety_code,
+                PacketType::Heartbeat
+            ),
+            2
+        );
+
+        clear_network_channels(&network, &[0, 1]);
+        time.set(500);
+        server.process().unwrap();
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[0, 1],
+                &server.safety_code,
+                PacketType::Heartbeat
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn both_endpoints_emit_heartbeats_across_multiple_periods_without_timeout() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        clear_network_channels(&network, &[0, 1, 2, 3]);
+
+        let mut client_sent_heartbeats = 0usize;
+        let mut server_sent_heartbeats = 0usize;
+        for now in [500u32, 1_000, 1_500, 2_000, 2_500] {
+            time.set(now);
+            client.process().unwrap();
+            client_sent_heartbeats += network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::Heartbeat,
+            );
+
+            server.process().unwrap();
+            assert_eq!(
+                server
+                    .timeliness_deadline_for_test()
+                    .map(|deadline| deadline.wrapping_millis()),
+                Some(now + 2_000)
+            );
+            server_sent_heartbeats += network_packet_type_count(
+                &network,
+                &[0, 1],
+                &server.safety_code,
+                PacketType::Heartbeat,
+            );
+
+            client.process().unwrap();
+            assert_eq!(
+                client
+                    .timeliness_deadline_for_test()
+                    .map(|deadline| deadline.wrapping_millis()),
+                Some(now + 2_000)
+            );
+            assert_eq!(client.state_machine.current_state, RastaState::Up);
+            assert_eq!(server.state_machine.current_state, RastaState::Up);
+            clear_network_channels(&network, &[0, 1, 2, 3]);
+        }
+
+        assert!(client_sent_heartbeats >= 6);
+        assert!(server_sent_heartbeats >= 6);
+    }
+
+    #[test]
+    fn process_relative_protocol_timestamp_offset_reproduces_future_rejection() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let client_clock = SplitClock::new(0, 0);
+        let server_clock = SplitClock::new(1_000, 1_000);
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            client_clock,
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            server_clock,
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        assert_eq!(
+            network_head_packet_type(&network, 0, &server.safety_code),
+            Some(PacketType::Heartbeat)
+        );
+
+        assert!(matches!(
+            client.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        assert_eq!(client.state_machine.current_state, RastaState::Closed);
+        assert_eq!(
+            client.take_diagnostic(),
+            Some(DiagnosticEvent {
+                kind: DiagnosticKind::ConnectionTimeout,
+                value: 1_000,
+            })
+        );
+    }
+
+    #[test]
+    fn shared_protocol_epoch_accepts_unequal_local_clock_origins() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let client_clock = SplitClock::new(0, 10_000);
+        let server_clock = SplitClock::new(5_000, 10_000);
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            client_clock.clone(),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            server_clock.clone(),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(server.state_machine.current_state, RastaState::Up);
+        clear_network_channels(&network, &[0, 1, 2, 3]);
+
+        for _ in 0..5 {
+            client_clock.advance(500);
+            server_clock.advance(500);
+            client.process().unwrap();
+            server.process().unwrap();
+            client.process().unwrap();
+            assert_eq!(client.state_machine.current_state, RastaState::Up);
+            assert_eq!(server.state_machine.current_state, RastaState::Up);
+            clear_network_channels(&network, &[0, 1, 2, 3]);
+        }
+
+        while let Some(diagnostic) = client.take_diagnostic() {
+            assert_ne!(diagnostic.kind, DiagnosticKind::ConnectionTimeout);
+        }
+        while let Some(diagnostic) = server.take_diagnostic() {
+            assert_ne!(diagnostic.kind, DiagnosticKind::ConnectionTimeout);
+        }
+    }
+
+    #[test]
+    fn incoming_heartbeats_do_not_suppress_outgoing_heartbeat() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        clear_network_channels(&network, &[0, 1, 2, 3]);
+
+        let mut server_heartbeats = 0usize;
+        for (incoming_at, due_at) in [(499u32, 500u32), (999, 1_000), (1_499, 1_500)] {
+            time.set(incoming_at);
+            client.send_packet(PacketType::Heartbeat, &[]).unwrap();
+            server.process().unwrap();
+            assert_eq!(
+                network_packet_type_count(
+                    &network,
+                    &[0, 1],
+                    &server.safety_code,
+                    PacketType::Heartbeat
+                ),
+                0
+            );
+
+            time.set(due_at);
+            server.process().unwrap();
+            server_heartbeats += network_packet_type_count(
+                &network,
+                &[0, 1],
+                &server.safety_code,
+                PacketType::Heartbeat,
+            );
+            assert_eq!(server.state_machine.current_state, RastaState::Up);
+            clear_network_channels(&network, &[0, 1, 2, 3]);
+        }
+
+        assert_eq!(server_heartbeats, 6);
+    }
+
+    #[test]
+    fn incoming_data_does_not_suppress_outgoing_heartbeat() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        clear_network_channels(&network, &[0, 1, 2, 3]);
+
+        let mut server_heartbeats = 0usize;
+        for (index, (incoming_at, due_at)) in [(499u32, 500u32), (999, 1_000), (1_499, 1_500)]
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            time.set(incoming_at);
+            let payload = [b'a'.wrapping_add(index as u8)];
+            client.send_application_data(&payload).unwrap();
+            server.process().unwrap();
+            assert!(server.has_received_data());
+            let mut output = [0u8; 8];
+            assert_eq!(server.receive_data(&mut output).unwrap(), 1);
+
+            time.set(due_at);
+            server.process().unwrap();
+            server_heartbeats += network_packet_type_count(
+                &network,
+                &[0, 1],
+                &server.safety_code,
+                PacketType::Heartbeat,
+            );
+            assert_eq!(server.state_machine.current_state, RastaState::Up);
+            clear_network_channels(&network, &[0, 1, 2, 3]);
+        }
+
+        assert_eq!(server_heartbeats, 6);
+    }
+
+    #[test]
+    fn outgoing_data_restarts_send_heartbeat_interval() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        clear_network_channels(&network, &[0, 1, 2, 3]);
+
+        time.set(400);
+        client.send_application_data(b"x").unwrap();
+        assert_eq!(
+            network_packet_type_count(&network, &[2, 3], &client.safety_code, PacketType::Data),
+            2
+        );
+
+        clear_network_channels(&network, &[2, 3]);
+        time.set(500);
+        client.process().unwrap();
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::Heartbeat
+            ),
+            0
+        );
+
+        time.set(900);
+        client.process().unwrap();
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[2, 3],
+                &client.safety_code,
+                PacketType::Heartbeat
+            ),
+            2
+        );
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
     }
 
     #[test]
@@ -1266,6 +2061,7 @@ mod cases {
         server.process().unwrap();
         assert_eq!(client.state_machine.current_state, RastaState::Up);
         assert_eq!(server.state_machine.current_state, RastaState::Up);
+        client.process().unwrap();
 
         client.send_application_data(b"zero").unwrap();
         server.process().unwrap();
@@ -1351,6 +2147,7 @@ mod cases {
         client.process().unwrap();
         server.process().unwrap();
         assert_eq!(client.state_machine.current_state, RastaState::Up);
+        clear_network_channels(&network, &[0, 1, 2, 3]);
 
         time.set(1_999);
         assert!(client.process().is_ok());
@@ -1368,9 +2165,9 @@ mod cases {
         ));
         assert_eq!(client.state_machine.current_state, RastaState::Closed);
         let mut saw_timeout = false;
-        for _ in 0..4 {
-            if client.take_diagnostic()
-                == Some(DiagnosticEvent {
+        while let Some(diagnostic) = client.take_diagnostic() {
+            if diagnostic
+                == (DiagnosticEvent {
                     kind: DiagnosticKind::ConnectionTimeout,
                     value: 2_000,
                 })
@@ -1400,6 +2197,412 @@ mod cases {
             network.borrow().count[2] + network.borrow().count[3],
             count_after_timeout
         );
+    }
+
+    #[test]
+    fn queued_heartbeat_at_deadline_prevents_false_timeout() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        client.process().unwrap();
+
+        time.set(1_999);
+        client.send_packet(PacketType::Heartbeat, &[]).unwrap();
+        server.process().unwrap();
+
+        time.set(2_000);
+        let expected_rx = client.sequence.expected_rx();
+        assert!(client.process().is_ok());
+
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(client.sequence.expected_rx(), expected_rx.wrapping_add(1));
+        assert_eq!(
+            client
+                .timeliness_deadline_for_test()
+                .map(|deadline| deadline.wrapping_millis()),
+            Some(4_000)
+        );
+        while let Some(diagnostic) = client.take_diagnostic() {
+            assert_ne!(diagnostic.kind, DiagnosticKind::ConnectionTimeout);
+        }
+        assert!(!network_has_packet_type(
+            &network,
+            &[2, 3],
+            &client.safety_code,
+            PacketType::DisconnectionRequest
+        ));
+    }
+
+    #[test]
+    fn first_peer_heartbeat_refreshes_active_receive_deadline() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        let deadline_before = client.timeliness_deadline_for_test().unwrap();
+
+        time.set(1_999);
+        server.process().unwrap();
+        assert_eq!(
+            network_head_packet_type(&network, 0, &server.safety_code),
+            Some(PacketType::Heartbeat)
+        );
+
+        let state_before = client.state_machine.current_state;
+        client.process().unwrap();
+        let state_after = client.state_machine.current_state;
+        let deadline_after = client.timeliness_deadline_for_test().unwrap();
+
+        assert_eq!(state_before, RastaState::Up);
+        assert_eq!(state_after, RastaState::Up);
+        assert!(instant_is_later(deadline_after, deadline_before));
+        assert_eq!(deadline_after.wrapping_millis(), 3_999);
+        while let Some(diagnostic) = client.take_diagnostic() {
+            assert_ne!(diagnostic.kind, DiagnosticKind::ConnectionTimeout);
+        }
+        assert!(!network_has_packet_type(
+            &network,
+            &[2, 3],
+            &client.safety_code,
+            PacketType::DisconnectionRequest
+        ));
+    }
+
+    #[test]
+    fn first_peer_heartbeat_at_exact_deadline_refreshes_before_timeout() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        let deadline_before = client.timeliness_deadline_for_test().unwrap();
+        assert_eq!(deadline_before.wrapping_millis(), 2_000);
+
+        time.set(2_000);
+        server.process().unwrap();
+        let state_before = client.state_machine.current_state;
+        client.process().unwrap();
+        let deadline_after = client.timeliness_deadline_for_test().unwrap();
+
+        assert_eq!(state_before, RastaState::Up);
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert!(instant_is_later(deadline_after, deadline_before));
+        assert_eq!(deadline_after.wrapping_millis(), 4_000);
+        while let Some(diagnostic) = client.take_diagnostic() {
+            assert_ne!(diagnostic.kind, DiagnosticKind::ConnectionTimeout);
+        }
+    }
+
+    #[test]
+    fn refreshed_deadline_is_not_overwritten_later_in_same_poll() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        let deadline_before = client.timeliness_deadline_for_test().unwrap();
+
+        time.set(1_250);
+        server.process().unwrap();
+        client.process().unwrap();
+        let deadline_after_packet = client.timeliness_deadline_for_test().unwrap();
+        assert_eq!(deadline_after_packet.wrapping_millis(), 3_250);
+        assert!(instant_is_later(deadline_after_packet, deadline_before));
+
+        client.process().unwrap();
+        assert_eq!(
+            client.timeliness_deadline_for_test(),
+            Some(deadline_after_packet)
+        );
+    }
+
+    #[test]
+    fn duplicate_redundancy_heartbeat_refreshes_once_without_shortening_deadline() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        client.process().unwrap();
+        clear_network_channels(&network, &[0, 1, 2, 3]);
+        let deadline_before = client.timeliness_deadline_for_test().unwrap();
+
+        time.set(1_000);
+        server.send_packet(PacketType::Heartbeat, &[]).unwrap();
+        assert_eq!(
+            network_packet_type_count(
+                &network,
+                &[0, 1],
+                &server.safety_code,
+                PacketType::Heartbeat
+            ),
+            2
+        );
+        client.process().unwrap();
+        let deadline_after = client.timeliness_deadline_for_test().unwrap();
+
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(deadline_after.wrapping_millis(), 3_000);
+        assert!(instant_is_later(deadline_after, deadline_before));
+        while let Some(diagnostic) = client.take_diagnostic() {
+            assert_ne!(diagnostic.kind, DiagnosticKind::ConnectionTimeout);
+        }
+    }
+
+    #[test]
+    fn rejected_heartbeat_does_not_refresh_receive_deadline() {
+        let clock = FakeClock::new(0);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            config(1, 2),
+        )
+        .unwrap();
+        conn.connect().unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+        let deadline_before = conn.timeliness_deadline_for_test().unwrap();
+
+        let mut heartbeat = packet(PacketType::Heartbeat, 0);
+        heartbeat.receiver_id = 1;
+        heartbeat.sender_id = 2;
+        heartbeat.sequence_number = 10;
+        heartbeat.confirmed_sequence_number = 0;
+        heartbeat.timestamp = 1_000;
+        heartbeat.confirmed_timestamp = 1_000;
+        let mut srl = [0u8; 512];
+        let length = heartbeat
+            .serialize(&mut srl, &conn.safety_code)
+            .expect("serialize heartbeat");
+        srl[length - 1] ^= 0xff;
+        let total =
+            length + RedundancyLayer::<SimpleMockTransport, SimpleMockTransport>::HEADER_SIZE;
+        let mut rl = [0u8; 520];
+        rl[..2].copy_from_slice(&(total as u16).to_le_bytes());
+        rl[4..8].copy_from_slice(&0u32.to_le_bytes());
+        rl[8..total].copy_from_slice(&srl[..length]);
+        conn.redundancy = RedundancyLayer::with_config(
+            SimpleMockTransport::with_receive(&rl[..total]),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+
+        clock.set(1_000);
+        conn.process().unwrap();
+        assert_eq!(conn.timeliness_deadline_for_test(), Some(deadline_before));
+        assert_eq!(
+            conn.take_diagnostic(),
+            Some(DiagnosticEvent {
+                kind: DiagnosticKind::SafetyCodeError,
+                value: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_queued_packet_at_deadline_does_not_prevent_timeout() {
+        let clock = FakeClock::new(0);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            config(1, 2),
+        )
+        .unwrap();
+        conn.connect().unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+
+        let mut heartbeat = packet(PacketType::Heartbeat, 0);
+        heartbeat.receiver_id = 1;
+        heartbeat.sender_id = 2;
+        heartbeat.sequence_number = 10;
+        heartbeat.confirmed_sequence_number = 0;
+        heartbeat.timestamp = 2_000;
+        heartbeat.confirmed_timestamp = 2_000;
+        let mut srl = [0u8; 512];
+        let length = heartbeat
+            .serialize(&mut srl, &conn.safety_code)
+            .expect("serialize heartbeat");
+        srl[length - 1] ^= 0xff;
+        let total =
+            length + RedundancyLayer::<SimpleMockTransport, SimpleMockTransport>::HEADER_SIZE;
+        let mut rl = [0u8; 520];
+        rl[..2].copy_from_slice(&(total as u16).to_le_bytes());
+        rl[4..8].copy_from_slice(&0u32.to_le_bytes());
+        rl[8..total].copy_from_slice(&srl[..length]);
+        conn.redundancy = RedundancyLayer::with_config(
+            SimpleMockTransport::with_receive(&rl[..total]),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
+
+        clock.set(2_000);
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        assert_eq!(conn.state_machine.current_state, RastaState::Closed);
+        assert_eq!(conn.sequence.expected_rx(), 10);
+        assert_eq!(
+            conn.take_diagnostic(),
+            Some(DiagnosticEvent {
+                kind: DiagnosticKind::SafetyCodeError,
+                value: 1,
+            })
+        );
+        assert_eq!(
+            conn.take_diagnostic(),
+            Some(DiagnosticEvent {
+                kind: DiagnosticKind::ConnectionTimeout,
+                value: 2_000,
+            })
+        );
+    }
+
+    #[test]
+    fn one_valid_redundancy_channel_at_deadline_prevents_connection_timeout() {
+        let network = Rc::new(RefCell::new(TestNetwork::new()));
+        let time = Rc::new(Cell::new(0));
+        let mut client = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 0),
+            LinkedTransport::new(network.clone(), 1),
+            SharedClock(time.clone()),
+            config(1, 2),
+        )
+        .unwrap();
+        let mut server = RastaConnection::try_new(
+            LinkedTransport::new(network.clone(), 2),
+            LinkedTransport::new(network.clone(), 3),
+            SharedClock(time.clone()),
+            config(2, 1),
+        )
+        .unwrap();
+
+        client.connect().unwrap();
+        server.connect().unwrap();
+        server.process().unwrap();
+        client.process().unwrap();
+        server.process().unwrap();
+        assert_eq!(
+            client.channel_statuses(),
+            [ChannelStatus::Healthy, ChannelStatus::Healthy]
+        );
+        while client.take_diagnostic().is_some() {}
+        client.process().unwrap();
+
+        time.set(1_999);
+        client.send_packet(PacketType::Heartbeat, &[]).unwrap();
+        server.process().unwrap();
+
+        time.set(2_000);
+        assert!(network.borrow_mut().drop_next(1));
+        assert!(client.process().is_ok());
+
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(client.channel_statuses()[0], ChannelStatus::Healthy);
+        let mut channel_failure_count = 0;
+        while let Some(diagnostic) = client.take_diagnostic() {
+            assert_ne!(diagnostic.kind, DiagnosticKind::ConnectionTimeout);
+            if diagnostic.kind == DiagnosticKind::ChannelSupervisionFailure {
+                channel_failure_count += 1;
+                assert_eq!(diagnostic.value, 1);
+            }
+        }
+        assert_eq!(channel_failure_count, 1);
     }
 
     #[test]
@@ -1436,11 +2639,11 @@ mod cases {
         conn.process().unwrap();
         assert_eq!(conn.state_machine.current_state, RastaState::Up);
 
-        clock.set(3_498);
+        clock.set(3_499);
         assert!(conn.process().is_ok());
         assert_eq!(conn.state_machine.current_state, RastaState::Up);
 
-        clock.set(3_499);
+        clock.set(3_500);
         assert!(matches!(
             conn.process(),
             Err(ConnectionError::SafetyTimeout)
@@ -1588,9 +2791,9 @@ mod cases {
         conn.process().unwrap();
         assert_eq!(conn.state_machine.current_state, RastaState::Up);
 
-        clock.set(1_988);
-        assert!(conn.process().is_ok());
         clock.set(1_989);
+        assert!(conn.process().is_ok());
+        clock.set(1_990);
         assert!(matches!(
             conn.process(),
             Err(ConnectionError::SafetyTimeout)
