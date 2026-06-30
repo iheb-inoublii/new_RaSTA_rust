@@ -30,10 +30,29 @@ pub const DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE: InteroperabilityProfile
         max_messages_per_packet: 1,
     };
 
+pub const LIBRASTA_LOCAL_PROFILE: InteroperabilityProfile = InteroperabilityProfile {
+    protocol_version: InteroperabilityProfile::VERSION_03_03,
+    safety_code_length: SafetyCodeLength::None,
+    redundancy_crc: RedundancyCrc::OptionA,
+    channel_count: 2,
+    network_identifier: 1234,
+    md4_initial_value: InteroperabilityProfile::RFC_MD4_INITIAL_VALUE,
+    t_max_ms: 10_000,
+    t_h_ms: 2_000,
+    t_seq_ms: 50,
+    n_send_max: 20,
+    mwa: 10,
+    defer_queue_capacity: 4,
+    retransmission_capacity: 20,
+    application_queue_capacity: 20,
+    diagnostic_queue_capacity: 16,
+    max_messages_per_packet: 1,
+};
+
 #[cfg(test)]
 mod tests {
-    use super::DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE;
-    use rasta_core::config::{InteroperabilityProfile, ProfileError};
+    use super::{DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE};
+    use rasta_core::config::{InteroperabilityProfile, ProfileError, SafetyCodeLength};
 
     #[test]
     fn academic_profile_is_valid_and_values_are_unchanged() {
@@ -50,5 +69,20 @@ mod tests {
         let mut invalid = profile;
         invalid.md4_initial_value = InteroperabilityProfile::RFC_MD4_INITIAL_VALUE;
         assert_eq!(invalid.validate(), Err(ProfileError::UnsafeMd4InitialValue));
+    }
+
+    #[test]
+    fn librasta_local_profile_matches_known_c_baseline() {
+        let profile = LIBRASTA_LOCAL_PROFILE;
+        assert_eq!(profile.protocol_version, *b"0303");
+        assert_eq!(profile.network_identifier, 1234);
+        assert_eq!(profile.safety_code_length, SafetyCodeLength::None);
+        assert_eq!(
+            profile.redundancy_crc,
+            rasta_core::redundancy::RedundancyCrc::OptionA
+        );
+        assert_eq!(profile.t_max_ms, 10_000);
+        assert_eq!(profile.t_h_ms, 2_000);
+        assert!(profile.validate().is_ok());
     }
 }

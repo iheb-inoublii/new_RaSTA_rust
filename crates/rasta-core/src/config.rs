@@ -5,6 +5,7 @@ use crate::redundancy::{RedundancyConfig, RedundancyCrc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SafetyCodeLength {
+    None,
     Md4Lower8,
     Md4Full16,
 }
@@ -20,6 +21,7 @@ pub struct RastaConfig {
     pub heartbeat_interval_ms: u32,
     pub n_send_max: u16,
     pub mwa: u16,
+    pub allow_unsafe_no_checksums: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,8 +85,9 @@ impl InteroperabilityProfile {
         if self.network_identifier == 0 {
             return Err(ProfileError::InvalidNetworkIdentifier);
         }
-        if self.md4_initial_value == Self::RFC_MD4_INITIAL_VALUE
-            || self.md4_initial_value == [0; 16]
+        if self.safety_code_length != SafetyCodeLength::None
+            && (self.md4_initial_value == Self::RFC_MD4_INITIAL_VALUE
+                || self.md4_initial_value == [0; 16])
         {
             return Err(ProfileError::UnsafeMd4InitialValue);
         }

@@ -114,14 +114,17 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             || config.mwa == 0
             || config.mwa >= config.n_send_max
             || config.redundancy.t_seq_ms == 0
-            || matches!(
-                config.safety_code.mode,
-                crate::connection::safety_code::SafetyCodeMode::None
-            )
-            || matches!(
-                config.redundancy.check_code,
-                crate::redundancy::RedundancyCheckCode::None
-            )
+            || (!config.allow_unsafe_no_checksums
+                && matches!(
+                    config.safety_code.mode,
+                    crate::connection::safety_code::SafetyCodeMode::None
+                ))
+            || (!config.allow_unsafe_no_checksums
+                && matches!(
+                    config.redundancy.check_code,
+                    crate::redundancy::RedundancyCheckCode::None
+                        | crate::redundancy::RedundancyCheckCode::OptionA
+                ))
         {
             return Err(ConnectionError::InvalidConfiguration);
         }

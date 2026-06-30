@@ -301,6 +301,7 @@ mod cases {
             heartbeat_interval_ms: 500,
             n_send_max: 16,
             mwa: 8,
+            allow_unsafe_no_checksums: false,
         }
     }
 
@@ -522,6 +523,58 @@ mod cases {
         left != right && left.elapsed_since(right).as_millis() < 0x8000_0000
     }
 
+    fn librasta_safety_none() -> SafetyCodeConfig {
+        SafetyCodeConfig::none()
+    }
+
+    fn librasta_frame_packet(frame: &[u8]) -> Packet {
+        assert_eq!(
+            u16::from_le_bytes([frame[0], frame[1]]) as usize,
+            frame.len()
+        );
+        assert_eq!(u16::from_le_bytes([frame[2], frame[3]]), 0);
+        Packet::parse(&frame[8..], &librasta_safety_none()).unwrap()
+    }
+
+    fn encode_librasta_frame(packet: &Packet, rl_sequence: u32) -> ([u8; 520], usize) {
+        let mut srl = [0u8; 512];
+        let srl_len = packet.serialize(&mut srl, &librasta_safety_none()).unwrap();
+        let total =
+            RedundancyLayer::<SimpleMockTransport, SimpleMockTransport>::HEADER_SIZE + srl_len;
+        let mut frame = [0u8; 520];
+        frame[..2].copy_from_slice(&(total as u16).to_le_bytes());
+        frame[2..4].copy_from_slice(&0u16.to_le_bytes());
+        frame[4..8].copy_from_slice(&rl_sequence.to_le_bytes());
+        frame[8..total].copy_from_slice(&srl[..srl_len]);
+        (frame, total)
+    }
+
+    const LIBRASTA_C_CONNREQ: [u8; 50] = [
+        0x32, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x38, 0x18, 0x61, 0x00, 0x00,
+        0x00, 0x60, 0x00, 0x00, 0x00, 0x04, 0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x44, 0x33,
+        0x22, 0x11, 0x00, 0x00, 0x00, 0x00, b'0', b'3', b'0', b'3', 0x0a, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    const LIBRASTA_C_CONNRESP: [u8; 50] = [
+        0x32, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x39, 0x18, 0x60, 0x00, 0x00,
+        0x00, 0x61, 0x00, 0x00, 0x00, 0x0d, 0x0c, 0x0b, 0x0a, 0x04, 0x03, 0x02, 0x01, 0x88, 0x77,
+        0x66, 0x55, 0x44, 0x33, 0x22, 0x11, b'0', b'3', b'0', b'3', 0x0a, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    const LIBRASTA_C_HEARTBEAT: [u8; 36] = [
+        0x24, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x4c, 0x18, 0x60, 0x00, 0x00,
+        0x00, 0x61, 0x00, 0x00, 0x00, 0x14, 0x13, 0x12, 0x11, 0x04, 0x03, 0x02, 0x01, 0xcc, 0xbb,
+        0xaa, 0x99, 0x44, 0x33, 0x22, 0x11,
+    ];
+
+    const LIBRASTA_C_DISCREQ: [u8; 40] = [
+        0x28, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x20, 0x00, 0x48, 0x18, 0x61, 0x00, 0x00,
+        0x00, 0x60, 0x00, 0x00, 0x00, 0x24, 0x23, 0x22, 0x21, 0x14, 0x13, 0x12, 0x11, 0xef, 0xbe,
+        0xad, 0xde, 0xcc, 0xbb, 0xaa, 0x99, 0x00, 0x00, 0x00, 0x00,
+    ];
+
     #[test]
     fn test_packet_serialization() {
         let safety = SafetyCodeConfig::default();
@@ -556,6 +609,81 @@ mod cases {
         assert_eq!(parsed.sequence_number, 10);
         assert_eq!(parsed.payload_len, 4);
         assert_eq!(parsed.payload[0], 0xAA);
+    }
+
+    #[test]
+    fn librasta_type_a_no_sr_checksum_vectors_decode() {
+        let request = librasta_frame_packet(&LIBRASTA_C_CONNREQ);
+        assert_eq!(request.packet_type, PacketType::ConnectionRequest);
+        assert_eq!(request.receiver_id, 0x61);
+        assert_eq!(request.sender_id, 0x60);
+        assert_eq!(request.sequence_number, 0x0102_0304);
+        assert_eq!(request.confirmed_sequence_number, 0);
+        assert_eq!(request.timestamp, 0x1122_3344);
+        assert_eq!(request.confirmed_timestamp, 0);
+        assert_eq!(request.payload_len, 14);
+        assert_eq!(&request.payload[..6], &[b'0', b'3', b'0', b'3', 0x0a, 0x00]);
+
+        let response = librasta_frame_packet(&LIBRASTA_C_CONNRESP);
+        assert_eq!(response.packet_type, PacketType::ConnectionResponse);
+        assert_eq!(response.receiver_id, 0x60);
+        assert_eq!(response.sender_id, 0x61);
+        assert_eq!(response.sequence_number, 0x0a0b_0c0d);
+        assert_eq!(response.confirmed_sequence_number, 0x0102_0304);
+        assert_eq!(response.timestamp, 0x5566_7788);
+        assert_eq!(response.confirmed_timestamp, 0x1122_3344);
+        assert_eq!(response.payload_len, 14);
+
+        let heartbeat = librasta_frame_packet(&LIBRASTA_C_HEARTBEAT);
+        assert_eq!(heartbeat.packet_type, PacketType::Heartbeat);
+        assert_eq!(heartbeat.receiver_id, 0x60);
+        assert_eq!(heartbeat.sender_id, 0x61);
+        assert_eq!(heartbeat.sequence_number, 0x1112_1314);
+        assert_eq!(heartbeat.confirmed_sequence_number, 0x0102_0304);
+        assert_eq!(heartbeat.timestamp, 0x99aa_bbcc);
+        assert_eq!(heartbeat.confirmed_timestamp, 0x1122_3344);
+        assert_eq!(heartbeat.payload_len, 0);
+
+        let disconnect = librasta_frame_packet(&LIBRASTA_C_DISCREQ);
+        assert_eq!(disconnect.packet_type, PacketType::DisconnectionRequest);
+        assert_eq!(disconnect.receiver_id, 0x61);
+        assert_eq!(disconnect.sender_id, 0x60);
+        assert_eq!(disconnect.sequence_number, 0x2122_2324);
+        assert_eq!(disconnect.confirmed_sequence_number, 0x1112_1314);
+        assert_eq!(disconnect.timestamp, 0xdead_beef);
+        assert_eq!(disconnect.confirmed_timestamp, 0x99aa_bbcc);
+        assert_eq!(disconnect.payload_len, 4);
+    }
+
+    #[test]
+    fn librasta_type_a_no_sr_checksum_vectors_encode_exact_lengths_and_bytes() {
+        for (vector, rl_sequence) in [
+            (&LIBRASTA_C_CONNREQ[..], 0u32),
+            (&LIBRASTA_C_CONNRESP[..], 1),
+            (&LIBRASTA_C_HEARTBEAT[..], 2),
+            (&LIBRASTA_C_DISCREQ[..], 3),
+        ] {
+            let packet = librasta_frame_packet(vector);
+            let (encoded, encoded_len) = encode_librasta_frame(&packet, rl_sequence);
+            assert_eq!(encoded_len, vector.len());
+            assert_eq!(&encoded[..encoded_len], vector);
+        }
+    }
+
+    #[test]
+    fn librasta_type_a_none_profile_uses_c_observed_frame_lengths() {
+        let safety = librasta_safety_none();
+        let redundancy = RedundancyConfig {
+            check_code: RedundancyCheckCode::OptionA,
+            t_seq_ms: 50,
+        };
+        assert_eq!(safety.len(), 0);
+        assert_eq!(redundancy.check_code_len(), 0);
+
+        assert_eq!(LIBRASTA_C_CONNREQ.len(), 50);
+        assert_eq!(LIBRASTA_C_CONNRESP.len(), 50);
+        assert_eq!(LIBRASTA_C_HEARTBEAT.len(), 36);
+        assert_eq!(LIBRASTA_C_DISCREQ.len(), 40);
     }
 
     #[test]
@@ -2964,6 +3092,32 @@ mod cases {
             ),
             Err(ConnectionError::InvalidConfiguration)
         ));
+
+        let mut invalid = base;
+        invalid.redundancy.check_code = RedundancyCheckCode::OptionA;
+        assert!(matches!(
+            RastaConnection::try_new(
+                SimpleMockTransport::empty(),
+                SimpleMockTransport::empty(),
+                MockClock { time: 0 },
+                invalid,
+            ),
+            Err(ConnectionError::InvalidConfiguration)
+        ));
+
+        let mut compatible = base;
+        compatible.safety_code = SafetyCodeConfig::none();
+        compatible.redundancy.check_code = RedundancyCheckCode::OptionA;
+        compatible.allow_unsafe_no_checksums = true;
+        assert!(
+            RastaConnection::try_new(
+                SimpleMockTransport::empty(),
+                SimpleMockTransport::empty(),
+                MockClock { time: 0 },
+                compatible,
+            )
+            .is_ok()
+        );
     }
 
     #[test]

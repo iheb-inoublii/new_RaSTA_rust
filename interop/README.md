@@ -37,6 +37,7 @@ cargo run -p rasta-node --release -- A <rust-or-peer-ip>
 Optional interop aids:
 
 ```text
+--profile <academic|librasta-local>
 --trace-wire
 --local-ip <ip>
 --channel-0-local-port <port>
@@ -45,6 +46,12 @@ Optional interop aids:
 --channel-1-remote-port <port>
 --local-id <decimal-or-0xhex>
 --remote-id <decimal-or-0xhex>
+```
+
+Example librasta-local client run:
+
+```bash
+cargo run -p rasta-node --release -- A 127.0.0.1 --profile librasta-local --trace-wire
 ```
 
 Example with tracing and explicit ports:
