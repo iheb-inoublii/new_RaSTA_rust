@@ -14,7 +14,10 @@ use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::rc::Rc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const DEFAULT_RUN_SECONDS: u64 = 5;
+const MAX_RUN_SECONDS: u64 = 24 * 60 * 60;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NodeRole {
@@ -39,6 +42,8 @@ struct NodeSettings {
     sender_id: u32,
     remote_id: u32,
     trace_wire: bool,
+    run_seconds: u64,
+    run_seconds_supplied: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -64,6 +69,8 @@ fn parse_node_settings(args: &[String]) -> Result<NodeSettings, &'static str> {
     };
     let mut local_ip = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     let mut trace_wire = false;
+    let mut run_seconds = DEFAULT_RUN_SECONDS;
+    let mut run_seconds_supplied = false;
     let mut profile = RuntimeProfile::Academic;
     let mut endpoint = academic_defaults(role);
 
@@ -78,6 +85,12 @@ fn parse_node_settings(args: &[String]) -> Result<NodeSettings, &'static str> {
             }
             "--trace-wire" => {
                 trace_wire = true;
+                index += 1;
+            }
+            "--run-seconds" => {
+                index += 1;
+                run_seconds = parse_run_seconds(args.get(index).ok_or("missing option value")?)?;
+                run_seconds_supplied = true;
                 index += 1;
             }
             "--local-ip" => {
@@ -141,6 +154,8 @@ fn parse_node_settings(args: &[String]) -> Result<NodeSettings, &'static str> {
             sender_id: endpoint.sender_id,
             remote_id: endpoint.remote_id,
             trace_wire,
+            run_seconds,
+            run_seconds_supplied,
         }),
         "B" => Ok(NodeSettings {
             role: NodeRole::B,
@@ -152,6 +167,8 @@ fn parse_node_settings(args: &[String]) -> Result<NodeSettings, &'static str> {
             sender_id: endpoint.sender_id,
             remote_id: endpoint.remote_id,
             trace_wire,
+            run_seconds,
+            run_seconds_supplied,
         }),
         _ => Err("invalid role"),
     }
@@ -244,6 +261,14 @@ fn parse_node_id(value: &str) -> Result<u32, &'static str> {
         return Err("invalid node id");
     }
     Ok(id)
+}
+
+fn parse_run_seconds(value: &str) -> Result<u64, &'static str> {
+    let seconds = value.parse::<u64>().map_err(|_| "invalid run seconds")?;
+    if seconds == 0 || seconds > MAX_RUN_SECONDS {
+        return Err("invalid run seconds");
+    }
+    Ok(seconds)
 }
 
 #[derive(Clone)]
@@ -366,7 +391,7 @@ fn main() {
         Ok(settings) => settings,
         Err("missing arguments") => {
             println!(
-                "Usage: {} <A|B> <remote_ip> [--profile academic|librasta-local] [interop options]",
+                "Usage: {} <A|B> <remote_ip> [--profile academic|librasta-local] [--run-seconds N] [interop options]",
                 args[0]
             );
             return;
@@ -387,6 +412,7 @@ fn main() {
     println!("Remote ID: {}", settings.remote_id);
     println!("Profile: {:?}", settings.profile);
     println!("Wire tracing: {}", settings.trace_wire);
+    println!("Run seconds: {}", settings.run_seconds);
     println!(
         "Channel A: {} -> {}",
         settings.local_addr_a, settings.remote_addr_a
@@ -490,7 +516,9 @@ fn main() {
 
     let mut last_state = api.status();
     let mut data_sent = false;
-    let start_time = std::time::Instant::now();
+    let start_time = Instant::now();
+    let mut up_since: Option<Instant> = None;
+    let mut next_runtime_report = Duration::from_secs(10);
 
     loop {
         if let Err(e) = api.poll() {
@@ -512,9 +540,20 @@ fn main() {
         }
 
         let current_state = api.status();
+        if current_state == ConnectionStatus::Up && up_since.is_none() {
+            up_since = Some(Instant::now());
+        }
         if current_state != last_state {
             println!("State transition: {:?} -> {:?}", last_state, current_state);
             last_state = current_state;
+        }
+
+        if let Some(connected_since) = up_since {
+            let connected_elapsed = connected_since.elapsed();
+            if connected_elapsed >= next_runtime_report {
+                println!("Connected for {} seconds", connected_elapsed.as_secs());
+                next_runtime_report = next_runtime_report.saturating_add(Duration::from_secs(10));
+            }
         }
 
         if settings.role == NodeRole::B && api.has_received_data() {
@@ -537,10 +576,15 @@ fn main() {
             data_sent = true;
         }
 
-        if settings.role == NodeRole::A
-            && data_sent
-            && start_time.elapsed() > Duration::from_secs(5)
-        {
+        let selected_duration_expired = if settings.run_seconds_supplied {
+            up_since.is_some_and(|connected_since| {
+                connected_since.elapsed() >= Duration::from_secs(settings.run_seconds)
+            })
+        } else {
+            start_time.elapsed() > Duration::from_secs(settings.run_seconds)
+        };
+
+        if settings.role == NodeRole::A && data_sent && selected_duration_expired {
             println!("Graceful disconnect...");
             if let Err(error) = api.close_connection() {
                 eprintln!("Failed to disconnect: {:?}", error);
@@ -558,7 +602,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeRole, RuntimeProfile, decode_wire_summary, hex_bytes, parse_node_settings};
+    use super::{
+        DEFAULT_RUN_SECONDS, NodeRole, RuntimeProfile, decode_wire_summary, hex_bytes,
+        parse_node_settings,
+    };
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
@@ -592,6 +639,8 @@ mod tests {
         assert_eq!(a.sender_id, 0x1234);
         assert_eq!(a.remote_id, 0x5678);
         assert!(!a.trace_wire);
+        assert_eq!(a.run_seconds, DEFAULT_RUN_SECONDS);
+        assert!(!a.run_seconds_supplied);
 
         let b = parse_node_settings(&args(&["rasta-node", "B", "127.0.0.1"])).unwrap();
         assert_eq!(b.role, NodeRole::B);
@@ -603,6 +652,23 @@ mod tests {
         assert_eq!(b.sender_id, a.remote_id);
         assert_eq!(b.remote_id, a.sender_id);
         assert!(!b.trace_wire);
+        assert_eq!(b.run_seconds, DEFAULT_RUN_SECONDS);
+        assert!(!b.run_seconds_supplied);
+    }
+
+    #[test]
+    fn parses_valid_run_seconds() {
+        let settings = parse_node_settings(&args(&[
+            "rasta-node",
+            "A",
+            "127.0.0.1",
+            "--run-seconds",
+            "40",
+        ]))
+        .unwrap();
+
+        assert_eq!(settings.run_seconds, 40);
+        assert!(settings.run_seconds_supplied);
     }
 
     #[test]
@@ -726,6 +792,40 @@ mod tests {
                 "unknown"
             ])),
             Err("invalid profile")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&["rasta-node", "A", "127.0.0.1", "--run-seconds"])),
+            Err("missing option value")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&[
+                "rasta-node",
+                "A",
+                "127.0.0.1",
+                "--run-seconds",
+                "0"
+            ])),
+            Err("invalid run seconds")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&[
+                "rasta-node",
+                "A",
+                "127.0.0.1",
+                "--run-seconds",
+                "forty"
+            ])),
+            Err("invalid run seconds")
+        );
+        assert_eq!(
+            parse_node_settings(&args(&[
+                "rasta-node",
+                "A",
+                "127.0.0.1",
+                "--run-seconds",
+                "86401"
+            ])),
+            Err("invalid run seconds")
         );
     }
 
