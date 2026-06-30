@@ -22,6 +22,11 @@ pub struct ConfirmedTimestampDecision {
     pub round_trip: DurationMs,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteTimestampDecision {
+    pub normalized_timestamp: ProtocolTimestamp,
+}
+
 impl TimeSupervisor {
     pub const DEFAULT_FUTURE_TOLERANCE_MS: u32 = 100;
 
@@ -51,6 +56,23 @@ impl TimeSupervisor {
         }
 
         Ok(())
+    }
+
+    pub fn validate_peer_relative(
+        &self,
+        local_timestamp: ProtocolTimestamp,
+        remote_timestamp: ProtocolTimestamp,
+        peer_to_local_offset: DurationMs,
+    ) -> Result<RemoteTimestampDecision, TimeSupervisionError> {
+        let normalized_timestamp = ProtocolTimestamp::from_wire_millis(
+            remote_timestamp
+                .wire_millis()
+                .wrapping_add(peer_to_local_offset.as_millis()),
+        );
+        self.validate(local_timestamp, normalized_timestamp)?;
+        Ok(RemoteTimestampDecision {
+            normalized_timestamp,
+        })
     }
 
     pub fn validate_confirmed_timestamp(

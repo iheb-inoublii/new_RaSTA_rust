@@ -1,13 +1,17 @@
 #[cfg(test)]
 mod cases {
-    use crate::config::{InteroperabilityProfile, ProfileError, SafetyCodeLength};
+    use crate::config::{
+        InteroperabilityProfile, ProfileError, SafetyCodeLength, TimestampCompatibilityMode,
+    };
     use crate::connection::pdu::{Packet, PacketError, PacketType};
     use crate::connection::retransmission::RetransmissionBuffer;
     use crate::connection::safety_code::{Md4, SafetyCodeConfig, SafetyCodeMode};
     use crate::connection::sequencing::{SequenceHandler, SequenceResult};
     use crate::connection::state_machine::{RastaState, StateMachine};
     use crate::connection::time_supervision::{TimeSupervisionError, TimeSupervisor};
-    use crate::connection::{ConnectionError, RastaConfig, RastaConnection};
+    use crate::connection::{
+        ConnectionError, RastaConfig, RastaConnection, TimestampTraceRejection,
+    };
     use crate::port::{RandomError, RandomSource, Transport, TransportError};
     use crate::redundancy::{
         ChannelStatus, RedundancyCheckCode, RedundancyConfig, RedundancyCrc, RedundancyLayer,
@@ -302,7 +306,15 @@ mod cases {
             n_send_max: 16,
             mwa: 8,
             allow_unsafe_no_checksums: false,
+            timestamp_compatibility: TimestampCompatibilityMode::StrictSynchronized,
         }
+    }
+
+    fn peer_relative_config(sender_id: u32, remote_id: u32) -> RastaConfig {
+        let mut cfg = config(sender_id, remote_id);
+        cfg.t_max = 10_000;
+        cfg.timestamp_compatibility = TimestampCompatibilityMode::PeerRelative;
+        cfg
     }
 
     fn valid_profile() -> InteroperabilityProfile {
@@ -326,6 +338,7 @@ mod cases {
             application_queue_capacity: 20,
             diagnostic_queue_capacity: 16,
             max_messages_per_packet: 1,
+            timestamp_compatibility: TimestampCompatibilityMode::StrictSynchronized,
         }
     }
 
@@ -361,6 +374,20 @@ mod cases {
     fn receive_packet_transport(packet: &Packet, safety: &SafetyCodeConfig) -> SimpleMockTransport {
         let (frame, len) = redundancy_frame_from_packet(packet, safety);
         SimpleMockTransport::with_receive(&frame[..len])
+    }
+
+    fn inject_received_packet(
+        connection: &mut RastaConnection<SimpleMockTransport, SimpleMockTransport, FakeClock>,
+        packet: &Packet,
+    ) {
+        connection.redundancy = RedundancyLayer::with_config(
+            receive_packet_transport(packet, &connection.safety_code),
+            SimpleMockTransport::empty(),
+            RedundancyConfig {
+                check_code: RedundancyCheckCode::None,
+                t_seq_ms: 100,
+            },
+        );
     }
 
     fn confirmation_connection(
@@ -1027,6 +1054,39 @@ mod cases {
             .validate_confirmed_timestamp(timestamp(10), timestamp(u32::MAX - 5), timestamp(5))
             .unwrap();
         assert_eq!(wrapped.round_trip, DurationMs::from_millis(5));
+    }
+
+    #[test]
+    fn peer_relative_timestamp_validation_accepts_offsets_and_wraparound() {
+        let supervisor = TimeSupervisor::new(10_000);
+        let timestamp = ProtocolTimestamp::from_wire_millis;
+
+        let positive = supervisor
+            .validate_peer_relative(
+                timestamp(10_000),
+                timestamp(9_000),
+                DurationMs::from_millis(1_000),
+            )
+            .unwrap();
+        assert_eq!(positive.normalized_timestamp, timestamp(10_000));
+
+        let negative = supervisor
+            .validate_peer_relative(
+                timestamp(10_000),
+                timestamp(11_000),
+                DurationMs::from_millis(u32::MAX - 999),
+            )
+            .unwrap();
+        assert_eq!(negative.normalized_timestamp, timestamp(10_000));
+
+        let wrapped = supervisor
+            .validate_peer_relative(
+                timestamp(5),
+                timestamp(u32::MAX - 4),
+                DurationMs::from_millis(10),
+            )
+            .unwrap();
+        assert_eq!(wrapped.normalized_timestamp, timestamp(5));
     }
 
     #[test]
@@ -1937,6 +1997,239 @@ mod cases {
                 kind: DiagnosticKind::ConnectionTimeout,
                 value: 1_000,
             })
+        );
+    }
+
+    #[test]
+    fn librasta_peer_relative_live_values_accept_heartbeat_and_refresh_deadline() {
+        let clock = FakeClock::new(0x1628_c50b);
+        let mut client = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            peer_relative_config(0x60, 0x61),
+        )
+        .unwrap();
+        client.connect().unwrap();
+
+        let mut response = packet(PacketType::ConnectionResponse, 14);
+        response.receiver_id = 0x60;
+        response.sender_id = 0x61;
+        response.sequence_number = 0;
+        response.confirmed_sequence_number = 0;
+        response.timestamp = 0x008b_e8ae;
+        response.confirmed_timestamp = 0x1628_c50b;
+        response.payload[..4].copy_from_slice(b"0303");
+        response.payload[4..6].copy_from_slice(&20u16.to_le_bytes());
+        inject_received_packet(&mut client, &response);
+        client.process().unwrap();
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+
+        clock.set(0x1628_c50c);
+        client.send_application_data(b"Hello from A").unwrap();
+
+        let mut heartbeat = packet(PacketType::Heartbeat, 0);
+        heartbeat.receiver_id = 0x60;
+        heartbeat.sender_id = 0x61;
+        heartbeat.sequence_number = 1;
+        heartbeat.confirmed_sequence_number = 2;
+        heartbeat.timestamp = 0x008b_e8af;
+        heartbeat.confirmed_timestamp = 0x1628_c50c;
+        inject_received_packet(&mut client, &heartbeat);
+        client.process().unwrap();
+
+        assert_eq!(client.state_machine.current_state, RastaState::Up);
+        assert_eq!(
+            client
+                .timeliness_deadline_for_test()
+                .map(MonotonicInstant::wrapping_millis),
+            Some(0x1628_ec1c)
+        );
+        let trace = client.take_timestamp_trace().unwrap();
+        assert_eq!(trace.raw_peer_timestamp, 0x008b_e8af);
+        assert_eq!(trace.normalized_peer_timestamp, 0x1628_c50c);
+        assert_eq!(trace.local_timestamp, 0x1628_c50c);
+        assert_eq!(trace.confirmed_timestamp, 0x1628_c50c);
+        assert_eq!(trace.rejection, None);
+        while let Some(diagnostic) = client.take_diagnostic() {
+            assert_ne!(diagnostic.kind, DiagnosticKind::ConnectionTimeout);
+        }
+    }
+
+    #[test]
+    fn peer_relative_rejects_stale_peer_timestamp() {
+        let clock = FakeClock::new(1_000);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            peer_relative_config(1, 2),
+        )
+        .unwrap();
+        conn.connect().unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+        conn.learn_peer_timestamp_offset_for_test(1_000, 5_000);
+
+        let mut valid = packet(PacketType::Heartbeat, 0);
+        valid.receiver_id = 1;
+        valid.sender_id = 2;
+        valid.sequence_number = 10;
+        valid.confirmed_sequence_number = 0;
+        valid.timestamp = 5_000;
+        valid.confirmed_timestamp = 1_000;
+        inject_received_packet(&mut conn, &valid);
+        conn.process().unwrap();
+        assert_eq!(conn.take_timestamp_trace().unwrap().rejection, None);
+
+        clock.set(11_001);
+        let mut stale = valid;
+        stale.sequence_number = 11;
+        stale.timestamp = 5_000;
+        stale.confirmed_timestamp = 1_000;
+        inject_received_packet(&mut conn, &stale);
+
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        let trace = conn.take_timestamp_trace().unwrap();
+        assert_eq!(
+            trace.rejection,
+            Some(TimestampTraceRejection::RemoteTimestampTooOld)
+        );
+        assert_eq!(conn.state_machine.current_state, RastaState::Closed);
+    }
+
+    #[test]
+    fn peer_relative_rejects_backward_peer_timestamp() {
+        let clock = FakeClock::new(1_000);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            peer_relative_config(1, 2),
+        )
+        .unwrap();
+        conn.connect().unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+        conn.learn_peer_timestamp_offset_for_test(1_000, 5_000);
+
+        let mut valid = packet(PacketType::Heartbeat, 0);
+        valid.receiver_id = 1;
+        valid.sender_id = 2;
+        valid.sequence_number = 10;
+        valid.confirmed_sequence_number = 0;
+        valid.timestamp = 5_000;
+        valid.confirmed_timestamp = 1_000;
+        inject_received_packet(&mut conn, &valid);
+        conn.process().unwrap();
+        assert_eq!(conn.take_timestamp_trace().unwrap().rejection, None);
+
+        clock.set(1_100);
+        let mut backward = valid;
+        backward.sequence_number = 11;
+        backward.timestamp = 4_999;
+        backward.confirmed_timestamp = 1_000;
+        inject_received_packet(&mut conn, &backward);
+
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        let trace = conn.take_timestamp_trace().unwrap();
+        assert_eq!(
+            trace.rejection,
+            Some(TimestampTraceRejection::RemoteTimestampMovedBackwards)
+        );
+        assert_eq!(conn.state_machine.current_state, RastaState::Closed);
+    }
+
+    #[test]
+    fn peer_relative_rejects_invalid_confirmed_timestamp() {
+        let clock = FakeClock::new(1_000);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            peer_relative_config(1, 2),
+        )
+        .unwrap();
+        conn.connect().unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+        conn.learn_peer_timestamp_offset_for_test(1_000, 5_000);
+
+        let mut valid = packet(PacketType::Heartbeat, 0);
+        valid.receiver_id = 1;
+        valid.sender_id = 2;
+        valid.sequence_number = 10;
+        valid.confirmed_sequence_number = 0;
+        valid.timestamp = 5_000;
+        valid.confirmed_timestamp = 1_000;
+        inject_received_packet(&mut conn, &valid);
+        conn.process().unwrap();
+        assert_eq!(conn.take_timestamp_trace().unwrap().rejection, None);
+
+        clock.set(1_100);
+        let mut invalid = valid;
+        invalid.sequence_number = 11;
+        invalid.timestamp = 5_100;
+        invalid.confirmed_timestamp = 999;
+        inject_received_packet(&mut conn, &invalid);
+
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        let trace = conn.take_timestamp_trace().unwrap();
+        assert_eq!(
+            trace.rejection,
+            Some(TimestampTraceRejection::ConfirmedTimestampMovedBackwards)
+        );
+        assert_eq!(
+            conn.take_diagnostic().map(|event| event.kind),
+            Some(DiagnosticKind::ConfirmedTimestampError)
+        );
+    }
+
+    #[test]
+    fn peer_relative_rejects_future_confirmed_timestamp() {
+        let clock = FakeClock::new(1_000);
+        let mut conn = RastaConnection::try_new(
+            SimpleMockTransport::empty(),
+            SimpleMockTransport::empty(),
+            clock.clone(),
+            peer_relative_config(1, 2),
+        )
+        .unwrap();
+        conn.connect().unwrap();
+        conn.sequence.accept_initial_rx(9);
+        conn.transition(RastaState::Up).unwrap();
+        conn.learn_peer_timestamp_offset_for_test(1_000, 5_000);
+
+        let mut heartbeat = packet(PacketType::Heartbeat, 0);
+        heartbeat.receiver_id = 1;
+        heartbeat.sender_id = 2;
+        heartbeat.sequence_number = 10;
+        heartbeat.confirmed_sequence_number = 0;
+        heartbeat.timestamp = 5_000;
+        heartbeat.confirmed_timestamp = 1_001;
+        inject_received_packet(&mut conn, &heartbeat);
+
+        assert!(matches!(
+            conn.process(),
+            Err(ConnectionError::SafetyTimeout)
+        ));
+        let trace = conn.take_timestamp_trace().unwrap();
+        assert_eq!(
+            trace.rejection,
+            Some(TimestampTraceRejection::ConfirmedTimestampTooFarInFuture)
+        );
+        assert_eq!(
+            conn.take_diagnostic().map(|event| event.kind),
+            Some(DiagnosticKind::ConfirmedTimestampError)
         );
     }
 
@@ -3244,6 +3537,7 @@ mod cases {
             application_queue_capacity: 20,
             diagnostic_queue_capacity: 16,
             max_messages_per_packet: 1,
+            timestamp_compatibility: TimestampCompatibilityMode::StrictSynchronized,
         };
         assert_eq!(profile.protocol_version, *b"0303");
         assert!(profile.validate().is_ok());

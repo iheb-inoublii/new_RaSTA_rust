@@ -2,6 +2,7 @@ mod profile;
 
 use profile::{DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE};
 use rasta_core::config::{RastaConfig, SafetyCodeLength};
+use rasta_core::connection::TimestampTraceEvent;
 use rasta_core::connection::safety_code::SafetyCodeConfig;
 use rasta_core::port::{Transport, TransportError};
 use rasta_core::redundancy::{RedundancyCheckCode, RedundancyConfig, RedundancyCrc};
@@ -313,7 +314,37 @@ fn decode_wire_summary(bytes: &[u8]) -> String {
         let srl_type = u16::from_le_bytes([bytes[10], bytes[11]]);
         summary.push_str(&format!(" srl_len={srl_len} srl_type={srl_type}"));
     }
+    if bytes.len() >= 36 {
+        let receiver = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+        let sender = u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        let sequence = u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+        let confirmed_sequence = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+        let timestamp = u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]);
+        let confirmed_timestamp = u32::from_le_bytes([bytes[32], bytes[33], bytes[34], bytes[35]]);
+        summary.push_str(&format!(
+            " receiver={receiver} sender={sender} sn={sequence} cs={confirmed_sequence} ts={timestamp:#010x} cts={confirmed_timestamp:#010x}"
+        ));
+    }
     summary
+}
+
+fn log_timestamp_trace(event: TimestampTraceEvent) {
+    eprintln!(
+        "timestamp raw_peer_ts={:#010x} learned_peer_offset={} normalized_ts={:#010x} local_ts={:#010x} local_receive_deadline={} confirmed_ts={:#010x} rejection={:?}",
+        event.raw_peer_timestamp,
+        event
+            .learned_peer_offset
+            .map(|value| format!("{value:#010x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        event.normalized_peer_timestamp,
+        event.local_timestamp,
+        event
+            .local_receive_deadline
+            .map(|value| format!("{value:#010x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        event.confirmed_timestamp,
+        event.rejection
+    );
 }
 
 fn hex_bytes(bytes: &[u8]) -> String {
@@ -436,6 +467,7 @@ fn main() {
         n_send_max: profile.n_send_max as u16,
         mwa: profile.mwa as u16,
         allow_unsafe_no_checksums: settings.profile == RuntimeProfile::LibrastaLocal,
+        timestamp_compatibility: profile.timestamp_compatibility,
     };
 
     let mut api = match RastaService::new(transport_a, transport_b, StdClock::new(), config) {
@@ -466,7 +498,17 @@ fn main() {
             while let Some(diagnostic) = api.take_diagnostic() {
                 eprintln!("RaSTA diagnostic: {:?}", diagnostic);
             }
+            if settings.trace_wire {
+                while let Some(event) = api.take_timestamp_trace() {
+                    log_timestamp_trace(event);
+                }
+            }
             break;
+        }
+        if settings.trace_wire {
+            while let Some(event) = api.take_timestamp_trace() {
+                log_timestamp_trace(event);
+            }
         }
 
         let current_state = api.status();
