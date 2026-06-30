@@ -94,7 +94,7 @@ Allowed status values used below:
 | Peer cumulative confirmation | ACK-bearing PDUs validate peer confirmation before buffer release | `connection/mod.rs` | `validate_peer_confirmation`, `apply_valid_confirmation` | confirmed-sequence tests | Implemented and directly tested | Medium | Verify ACK-bearing PDU set with standard. |
 | Retransmission request point | Uses `confirmed_sequence_number = missing_sequence - 1` | `connection/mod.rs` | `send_retransmission_request` | retransmission request tests | Implemented with project-specific assumption | High | Confirm special field meaning against DIN. |
 | RL redundancy sequence | Separate RL sequence, expected/duplicate/ahead/violation classification | `redundancy/sequence.rs`, `redundancy/channel.rs` | `RedundancySequence` | redundancy sequence/channel tests | Implemented and directly tested | Medium | Validate violation window (`>40`) with standard/profile. |
-| Protocol timestamps | Separate protocol timestamp source from monotonic deadlines | `time.rs`, `connection/time_supervision.rs` | `ProtocolTimestamp`, `TimeSupervisor` | time/timeliness tests | Implemented and directly tested | Medium | Confirm peer timestamp origin assumptions. |
+| Protocol timestamps | Separate protocol timestamp source from monotonic deadlines; platform `StdClock` maps wire timestamps to a shared epoch sampled once at startup and advanced monotonically | `time.rs`, `connection/time_supervision.rs`, `rasta-platform/src/std_clock.rs` | `ProtocolTimestamp`, `TimeSupervisor`, `StdClock` | time/timeliness tests, unequal local-origin tests | Implemented with project-specific assumption | High | Confirm DIN timestamp origin and synchronization accuracy requirements. |
 | Confirmed timestamps | Validated against previous confirmed timestamp and local time | `connection/time_supervision.rs`, `connection/mod.rs` | `validate_confirmed_timestamp`, `validate_timeliness` | confirmed timestamp tests | Implemented and directly tested | High | Confirm exact DIN confirmed-timestamp formula and future tolerance. |
 | Gap detection | Sequence gap in `Up` requests retransmission and retains expected RX | `connection/mod.rs` | `handle_packet`, `send_retransmission_request` | recovery test | Implemented and directly tested | Medium | Add multi-gap edge cases with independent traces. |
 | Retransmission timeout | Timeout behavior during retransmission-specific states | `connection/mod.rs`, timers | global `T_max` only | timeliness tests | Partially implemented | High | Determine whether DIN has retransmission-specific timeout/event rows. |
@@ -208,8 +208,10 @@ changing production code.
 - `rasta-core` owns protocol logic and only depends on port traits.
 - `rasta-platform::udp::UdpSocketTransport` implements `Transport` using
   nonblocking UDP sockets; no channel-health policy exists in platform code.
-- `rasta-platform::std_clock::StdClock` provides monotonic and protocol
-  timestamp sources.
+- `rasta-platform::std_clock::StdClock` provides process-local monotonic
+  scheduling instants and shared-epoch protocol timestamps. The epoch is sampled
+  from system time at clock construction and then advanced with `Instant`, so
+  later wall-clock adjustments do not move protocol timestamps backward.
 - `apps/rasta-node` owns CLI, profile wiring, two UDP transports, and node
   lifecycle.
 - The root `rasta_stack` compatibility facade has been removed; active code

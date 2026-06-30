@@ -36,3 +36,5 @@ Thumbs.db
 coverage/
 tarpaulin-report.html
 lcov.info
+
+/new_RaSTA_rust/
