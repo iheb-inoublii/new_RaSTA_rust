@@ -1,61 +1,19 @@
-//! Academic interoperability-test profile — non-production.
+//! Application aliases for library-defined test profiles.
 //!
-//! These values are for the runnable demonstration only. They are not approved
-//! operational railway parameters.
+//! These profiles are for runnable demonstrations and interoperability testing.
+//! They are not approved operational railway parameters.
 
-use rasta_core::config::{InteroperabilityProfile, SafetyCodeLength, TimestampCompatibilityMode};
-use rasta_core::redundancy::RedundancyCrc;
+use rasta_core::config::RastaProfile;
 
-pub const DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE: InteroperabilityProfile =
-    InteroperabilityProfile {
-        protocol_version: InteroperabilityProfile::VERSION_03_03,
-        safety_code_length: SafetyCodeLength::Md4Lower8,
-        redundancy_crc: RedundancyCrc::OptionB,
-        channel_count: 2,
-        network_identifier: 0x0000_0001,
-        // A=0x67452302, B=0xEFCDAB98, C=0x98BADCFF, D=0x10325477, little-endian words.
-        md4_initial_value: [
-            0x02, 0x23, 0x45, 0x67, 0x98, 0xab, 0xcd, 0xef, 0xff, 0xdc, 0xba, 0x98, 0x77, 0x54,
-            0x32, 0x10,
-        ],
-        t_max_ms: 1_800,
-        t_h_ms: 300,
-        t_seq_ms: 100,
-        n_send_max: 20,
-        mwa: 10,
-        defer_queue_capacity: 4,
-        retransmission_capacity: 20,
-        application_queue_capacity: 20,
-        diagnostic_queue_capacity: 16,
-        max_messages_per_packet: 1,
-        timestamp_compatibility: TimestampCompatibilityMode::StrictSynchronized,
-    };
-
-pub const LIBRASTA_LOCAL_PROFILE: InteroperabilityProfile = InteroperabilityProfile {
-    protocol_version: InteroperabilityProfile::VERSION_03_03,
-    safety_code_length: SafetyCodeLength::None,
-    redundancy_crc: RedundancyCrc::OptionA,
-    channel_count: 2,
-    network_identifier: 1234,
-    md4_initial_value: InteroperabilityProfile::RFC_MD4_INITIAL_VALUE,
-    t_max_ms: 10_000,
-    t_h_ms: 2_000,
-    t_seq_ms: 50,
-    n_send_max: 20,
-    mwa: 10,
-    defer_queue_capacity: 4,
-    retransmission_capacity: 20,
-    application_queue_capacity: 20,
-    diagnostic_queue_capacity: 16,
-    max_messages_per_packet: 1,
-    timestamp_compatibility: TimestampCompatibilityMode::PeerRelative,
-};
+pub const DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE: RastaProfile =
+    RastaProfile::ACADEMIC_DEFAULT;
+pub const LIBRASTA_LOCAL_PROFILE: RastaProfile = RastaProfile::LIBRASTA_LOCAL;
 
 #[cfg(test)]
 mod tests {
     use super::{DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE};
     use rasta_core::config::{
-        InteroperabilityProfile, ProfileError, SafetyCodeLength, TimestampCompatibilityMode,
+        ConfigError, InteroperabilityProfile, SafetyCodeLength, TimestampCompatibilityMode,
     };
 
     #[test]
@@ -76,7 +34,7 @@ mod tests {
 
         let mut invalid = profile;
         invalid.md4_initial_value = InteroperabilityProfile::RFC_MD4_INITIAL_VALUE;
-        assert_eq!(invalid.validate(), Err(ProfileError::UnsafeMd4InitialValue));
+        assert_eq!(invalid.validate(), Err(ConfigError::UnsafeMd4InitialValue));
     }
 
     #[test]
@@ -95,6 +53,6 @@ mod tests {
             profile.timestamp_compatibility,
             TimestampCompatibilityMode::PeerRelative
         );
-        assert!(profile.validate().is_ok());
+        assert!(profile.validate_allowing_unsafe_no_checksums().is_ok());
     }
 }

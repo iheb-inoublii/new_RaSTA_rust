@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod cases {
     use crate::config::{
-        InteroperabilityProfile, ProfileError, SafetyCodeLength, TimestampCompatibilityMode,
+        ConfigError, InteroperabilityProfile, ProfileError, RastaProfile, RastaProfileBuilder,
+        SafetyCodeLength, TimestampCompatibilityMode,
     };
     use crate::connection::pdu::{Packet, PacketError, PacketType};
     use crate::connection::retransmission::RetransmissionBuffer;
@@ -3458,6 +3459,84 @@ mod cases {
         let mut invalid = base;
         invalid.md4_initial_value = InteroperabilityProfile::RFC_MD4_INITIAL_VALUE;
         assert_eq!(invalid.validate(), Err(ProfileError::UnsafeMd4InitialValue));
+    }
+
+    #[test]
+    fn predefined_academic_profile_is_valid() {
+        let profile = RastaProfile::academic_default().unwrap();
+
+        assert_eq!(profile, RastaProfile::ACADEMIC_DEFAULT);
+        assert_eq!(profile.network_identifier, 0x0000_0001);
+        assert_eq!(profile.safety_code_length, SafetyCodeLength::Md4Lower8);
+        assert_eq!(profile.redundancy_crc, RedundancyCrc::OptionB);
+        assert_eq!(profile.t_max_ms, 1_800);
+        assert_eq!(profile.t_h_ms, 300);
+        assert_eq!(profile.t_seq_ms, 100);
+        assert_eq!(
+            profile.timestamp_compatibility,
+            TimestampCompatibilityMode::StrictSynchronized
+        );
+    }
+
+    #[test]
+    fn predefined_librasta_local_profile_is_valid_with_explicit_unsafe_opt_in() {
+        let profile = RastaProfile::librasta_local().unwrap();
+
+        assert_eq!(profile, RastaProfile::LIBRASTA_LOCAL);
+        assert_eq!(profile.network_identifier, 1234);
+        assert_eq!(profile.safety_code_length, SafetyCodeLength::None);
+        assert_eq!(profile.redundancy_crc, RedundancyCrc::OptionA);
+        assert_eq!(profile.t_max_ms, 10_000);
+        assert_eq!(profile.t_h_ms, 2_000);
+        assert_eq!(profile.t_seq_ms, 50);
+        assert_eq!(
+            profile.timestamp_compatibility,
+            TimestampCompatibilityMode::PeerRelative
+        );
+    }
+
+    #[test]
+    fn custom_profile_builder_can_create_valid_profile_values() {
+        let profile = RastaProfileBuilder::new()
+            .network_identifier(0x55aa)
+            .timing(2_500, 500, 125)
+            .flow_control(12, 6)
+            .timestamp_compatibility(TimestampCompatibilityMode::StrictSynchronized)
+            .build()
+            .unwrap();
+
+        assert_eq!(profile.network_identifier, 0x55aa);
+        assert_eq!(profile.t_max_ms, 2_500);
+        assert_eq!(profile.t_h_ms, 500);
+        assert_eq!(profile.t_seq_ms, 125);
+        assert_eq!(profile.n_send_max, 12);
+        assert_eq!(profile.mwa, 6);
+        assert_eq!(profile.retransmission_capacity, 12);
+    }
+
+    #[test]
+    fn custom_profile_builder_rejects_invalid_timing() {
+        assert_eq!(
+            RastaProfileBuilder::new().timing(300, 300, 100).build(),
+            Err(ConfigError::InvalidTiming)
+        );
+        assert_eq!(
+            RastaProfileBuilder::new().timing(1_800, 0, 100).build(),
+            Err(ConfigError::InvalidTiming)
+        );
+    }
+
+    #[test]
+    fn no_checksum_profile_requires_explicit_unsafe_opt_in() {
+        let builder = RastaProfileBuilder::new()
+            .safety_code_length(SafetyCodeLength::None)
+            .redundancy_crc(RedundancyCrc::OptionA);
+
+        assert_eq!(
+            builder.build(),
+            Err(ConfigError::UnsafeNoChecksumRequiresOptIn)
+        );
+        assert!(builder.allow_unsafe_no_checksums(true).build().is_ok());
     }
 
     #[test]

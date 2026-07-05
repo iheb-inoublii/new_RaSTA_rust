@@ -462,7 +462,11 @@ fn main() {
         RuntimeProfile::Academic => DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE,
         RuntimeProfile::LibrastaLocal => LIBRASTA_LOCAL_PROFILE,
     };
-    if let Err(error) = profile.validate() {
+    let profile_validation = match settings.profile {
+        RuntimeProfile::Academic => profile.validate(),
+        RuntimeProfile::LibrastaLocal => profile.validate_allowing_unsafe_no_checksums(),
+    };
+    if let Err(error) = profile_validation {
         eprintln!("Invalid interoperability-test profile: {:?}", error);
         return;
     }
