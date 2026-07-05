@@ -183,6 +183,10 @@ SBB configuration values are now documented, but a runtime endpoint or adapter/w
 
 Do not add `RastaProfile::sbb_local()` yet. The values are known, but a final runtime interoperability profile should wait until the SBB adapter/wrapper path is confirmed with live evidence.
 
+## Wrapper Design Follow-Up
+
+The planned wrapper architecture is documented in `docs/sbb-wrapper-design.md`. It describes why a wrapper is needed, how SBB adapter functions could map to UDP sockets, and what must be confirmed before any Rust-to-SBB interoperability claim or `sbb-local` profile is added.
+
 ## Next Steps
 
 1. Identify or create a small SBB wrapper executable that implements the required adapter interfaces.
