@@ -281,8 +281,9 @@ Actual Kali result:
 
 ## Current Status
 
-The wrapper is a compile-ready skeleton with real UDP transport and an internal
-SafRetL adapter to SBB RedL bridge.
+The wrapper is a compile-ready smoke harness with real UDP transport, an
+internal SafRetL adapter to SBB RedL bridge, and a Step 8G SafRetL public API
+run loop.
 
 Implemented:
 
@@ -292,13 +293,15 @@ Implemented:
 - Internal bridge from `sradin_*` to SBB RedL public APIs.
 - Real UDP-backed behavior for `redtri_Init`, `redtri_SendMessage`, and `redtri_ReadMessage`.
 - `sradin_ReadMessage` returns `radef_kNoMessageReceived` when RedL has no queued message.
-- CLI smoke runs open sockets, print send/read statuses, and close sockets before exiting successfully.
+- SBB SafRetL public API calls for init, active open, timing checks, state reads, application send/read, and close.
+- CLI smoke opens sockets, initializes RedL/SafRetL, polls for `--run-seconds`, and closes sockets before exiting.
 - Ping/Pong payload encoding and decoding using tag `0x03` / `0x04` plus little-endian `u32`.
 
 Stubbed:
 
-- SBB SafRetL APIs are not called yet.
-- No connection, heartbeat, retransmission, or safety-code behavior is exercised.
+- Full SBB-to-SBB and Rust-to-SBB scenarios are not implemented yet.
+- No Rust `sbb-local` profile exists yet.
+- No Rust-to-SBB interoperability is claimed.
 
 ## Step 8F RedL Bridge
 
@@ -377,10 +380,66 @@ Result:
 - CLI smoke with the 5-byte dummy payload returns RedL result `17`, expected because it is not a valid/minimum SafRetL PDU.
 - No Rust-to-SBB interoperability is claimed.
 
-## Step 8G Remaining Work
+## Step 8G SafRetL Run Loop
+
+Step 8G adds `src/sbb_endpoint.h` and `src/sbb_endpoint.c` as a small
+wrapper-only layer around SBB SafRetL. It does not change Rust protocol code,
+add Docker, add a Rust `sbb-local` profile, or claim Rust-to-SBB
+interoperability.
+
+Exact SBB SafRetL public functions used from `srapi_sr_api.h`:
+
+- `srapi_Init`
+- `srapi_OpenConnection`
+- `srapi_CheckTimings`
+- `srapi_GetConnectionState`
+- `srapi_SendData`
+- `srapi_ReadData`
+- `srapi_CloseConnection`
+
+Exact app-side SafRetL notifications implemented from
+`srnot_sr_notifications.h`:
+
+- `srnot_MessageReceivedNotification`
+- `srnot_ConnectionStateNotification`
+- `srnot_SrDiagnosticNotification`
+- `srnot_RedDiagnosticNotification`
+
+Smoke configuration comes from SBB test defaults:
+
+| Field | Value |
+| --- | --- |
+| network ID | `123456` |
+| connection 0 sender ID | `0x61` |
+| connection 0 receiver ID | `0x62` |
+| `t_max` | `750 ms` |
+| `t_h` | `300 ms` |
+| safety code | Lower MD4 |
+| `m_w_a` | `10` |
+| `n_send_max` | `20` |
+| `n_max_packet` | `1` |
+
+The CLI runtime banner is:
+
+```text
+Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed
+```
+
+Active mode calls `srapi_OpenConnection`. Both active and passive modes poll
+`srapi_CheckTimings`, read state through `srapi_GetConnectionState`, call
+`srapi_ReadData`, and close via `srapi_CloseConnection`. Ping payloads are sent
+only after SafRetL reports `Up`.
+
+New smoke test:
+
+```sh
+./interop/sbb-wrapper/build/sbb_safretl_smoke_test
+```
+
+## Remaining Work After Step 8G
 
 1. Implement bounded receive queues for `sradin_ReadMessage` if SBB requires asynchronous adapter handoff.
-2. Call SBB SafRetL initialization, timing, open, send, receive, state, and close APIs from the wrapper loop.
+2. Verify Step 8G in Kali with the real SBB checkout.
 3. Run an SBB-to-SBB wrapper baseline before Rust-to-SBB.
 4. Run Rust active to SBB passive with captured traces.
 5. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.

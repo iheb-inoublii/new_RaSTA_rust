@@ -111,7 +111,7 @@ The wrapper common target is now an object library so these implementations are 
 ## Open points
 
 - Add bounded adapter queues if SafRetL requires asynchronous handoff.
-- Implement the SBB SafRetL API run loop.
+- Step 8G supersedes this RedL-only scope by adding a smoke-only SBB SafRetL API run loop.
 - Run an SBB-to-SBB wrapper baseline.
 - Run Rust-to-SBB only after profile/config evidence exists.
 

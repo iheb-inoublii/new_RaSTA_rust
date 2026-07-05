@@ -1,11 +1,13 @@
-#include "ping_pong_payload.h"
-#include "sbb_adapter.h"
+#define _POSIX_C_SOURCE 200809L
+
+#include "sbb_endpoint.h"
 #include "udp_transport.h"
 
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef enum WrapperRole {
     WRAPPER_ROLE_ACTIVE,
@@ -148,38 +150,28 @@ static void print_settings(const WrapperSettings *settings)
     sbb_wrapper_udp_print_config(&settings->udp);
 }
 
-static void run_stub_smoke_checks(void)
+static uint32_t monotonic_millis(void)
 {
-    uint8_t payload[SBB_WRAPPER_PING_PONG_PAYLOAD_LEN] = {0};
-    uint8_t receive_buffer[128] = {0};
-    size_t payload_length = 0;
-    uint16_t received_length = 0;
-    radef_RaStaReturnCode result;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (uint32_t)((now.tv_sec * 1000LL) + (now.tv_nsec / 1000000L));
+}
 
-    if (sbb_wrapper_encode_ping(1u, payload, sizeof(payload), &payload_length) == SBB_WRAPPER_PAYLOAD_OK) {
-        sradin_SendMessage(0u, (uint16_t)payload_length, payload);
-        puts("[sbb-wrapper] sradin_SendMessage smoke invoked");
-
-        redtri_SendMessage(0u, (uint16_t)payload_length, payload);
-        puts("[sbb-wrapper] redtri_SendMessage smoke invoked");
-    }
-
-    result = sradin_ReadMessage(0u, (uint16_t)sizeof(receive_buffer), &received_length, receive_buffer);
-    printf(
-        "[sbb-wrapper] sradin_ReadMessage smoke result=%d length=%zu\n",
-        result,
-        (size_t)received_length);
-
-    result = redtri_ReadMessage(0u, (uint16_t)sizeof(receive_buffer), &received_length, receive_buffer);
-    printf(
-        "[sbb-wrapper] redtri_ReadMessage smoke result=%d length=%zu\n",
-        result,
-        (size_t)received_length);
+static void sleep_millis(long millis)
+{
+    struct timespec delay;
+    delay.tv_sec = millis / 1000L;
+    delay.tv_nsec = (millis % 1000L) * 1000000L;
+    nanosleep(&delay, 0);
 }
 
 int main(int argc, char **argv)
 {
     WrapperSettings settings;
+    SbbEndpoint endpoint;
+    radef_RaStaReturnCode result;
+    uint32_t end_time;
+    unsigned int next_ping = 1u;
 
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
         print_usage(argv[0]);
@@ -191,7 +183,7 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    puts("[sbb-wrapper] Step 8F SBB RedL bridge smoke only; no Rust-to-SBB interop is claimed");
+    puts("[sbb-wrapper] Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed");
     print_settings(&settings);
 
     if (sbb_wrapper_udp_init(&settings.udp) != 0) {
@@ -199,11 +191,57 @@ int main(int argc, char **argv)
     }
 
     redtri_Init();
-    sradin_Init();
+    sbb_endpoint_configure(
+        &endpoint,
+        settings.role == WRAPPER_ROLE_ACTIVE ? SBB_ENDPOINT_ROLE_ACTIVE : SBB_ENDPOINT_ROLE_PASSIVE,
+        settings.trace);
 
-    run_stub_smoke_checks();
+    result = sbb_endpoint_init(&endpoint);
+    if (result != radef_kNoError) {
+        printf("[sbb-wrapper] SafRetL init failed result=%d\n", result);
+        sbb_wrapper_udp_close();
+        return 1;
+    }
 
-    puts("[sbb-wrapper] exiting after skeleton initialization");
+    result = sbb_endpoint_open(&endpoint);
+    if (result != radef_kNoError) {
+        printf("[sbb-wrapper] SafRetL open failed result=%d\n", result);
+        sbb_wrapper_udp_close();
+        return 1;
+    }
+
+    end_time = monotonic_millis() + (settings.run_seconds * 1000u);
+    while ((int32_t)(end_time - monotonic_millis()) > 0) {
+        result = sbb_endpoint_poll(&endpoint);
+        if (result != radef_kNoError) {
+            printf("[sbb-wrapper] SafRetL poll returned result=%d\n", result);
+            break;
+        }
+
+        result = sbb_endpoint_read(&endpoint);
+        if (result != radef_kNoError && result != radef_kNoMessageReceived) {
+            printf("[sbb-wrapper] SafRetL read returned result=%d\n", result);
+        }
+
+        if (settings.role == WRAPPER_ROLE_ACTIVE && sbb_endpoint_is_up(&endpoint) && next_ping <= settings.rounds) {
+            result = sbb_endpoint_send_ping(&endpoint, next_ping);
+            if (result == radef_kNoError) {
+                printf("[sbb-wrapper] sent Ping(%u)\n", next_ping);
+                next_ping += 1u;
+            } else if (settings.trace) {
+                printf("[sbb-wrapper] Ping(%u) not sent result=%d\n", next_ping, result);
+            }
+        }
+
+        sleep_millis(10L);
+    }
+
+    result = sbb_endpoint_close(&endpoint);
+    if (result != radef_kNoError && settings.trace) {
+        printf("[sbb-wrapper] SafRetL close returned result=%d\n", result);
+    }
+
+    puts("[sbb-wrapper] exiting after SafRetL run-loop smoke");
     sbb_wrapper_udp_close();
     return 0;
 }

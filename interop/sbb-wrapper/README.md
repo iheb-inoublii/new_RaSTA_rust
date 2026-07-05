@@ -10,6 +10,7 @@ The current skeleton:
 - prints deterministic parsed configuration
 - defines required `sradin_*` and `redtri_*` symbols with SBB-compatible signatures
 - bridges `sradin_*` calls to SBB RedL when `SBB_ROOT` is provided
+- links SBB SafRetL when `SBB_ROOT` is provided and runs a smoke-only `srapi_*` loop
 - owns real POSIX UDP sockets for two wrapper transport channels
 - returns `radef_kNoMessageReceived` when nonblocking UDP receive has no datagram
 - provides a Ping/Pong payload codec matching Rust `ApplicationMessage`
@@ -24,7 +25,8 @@ ctest --test-dir interop/sbb-wrapper/build
 ```
 
 When `SBB_ROOT` points at the SBB checkout, the wrapper CMake embeds the SBB
-`rasta_common` and `rasta_redundancy` modules and compiles the RedL bridge.
+`rasta_common`, `rasta_redundancy`, and `rasta_safety_retransmission` modules
+and compiles the RedL/SafRetL smoke bridge.
 
 ## Step 8D Kali Verification
 
@@ -158,6 +160,66 @@ Verified Kali RedL bridge result:
 - CLI smoke with the 5-byte dummy payload returns RedL result `17`, which is expected because it is not a valid/minimum SafRetL PDU.
 - Runtime log says Step 8F SBB RedL bridge smoke only; no Rust-to-SBB interop is claimed.
 
+## Step 8G SafRetL Run Loop
+
+Step 8G links the SBB SafRetL module and adds a wrapper-only endpoint layer
+around the public SBB SafRetL API. This is still a smoke path inside the SBB
+wrapper and is not Rust-to-SBB interoperability.
+
+SBB SafRetL functions used:
+
+- `srapi_Init`
+- `srapi_OpenConnection`
+- `srapi_CheckTimings`
+- `srapi_GetConnectionState`
+- `srapi_SendData`
+- `srapi_ReadData`
+- `srapi_CloseConnection`
+
+Wrapper-side SafRetL notification callbacks implemented:
+
+- `srnot_MessageReceivedNotification`
+- `srnot_ConnectionStateNotification`
+- `srnot_SrDiagnosticNotification`
+- `srnot_RedDiagnosticNotification`
+
+Smoke configuration:
+
+- network ID: `123456`
+- connection 0 sender ID: `0x61`
+- connection 0 receiver ID: `0x62`
+- `t_max`: `750 ms`
+- `t_h`: `300 ms`
+- safety code: Lower MD4
+- `m_w_a`: `10`
+- `n_send_max`: `20`
+- `n_max_packet`: `1`
+
+New smoke test command:
+
+```sh
+./interop/sbb-wrapper/build/sbb_safretl_smoke_test
+```
+
+Expected Kali validation commands:
+
+```sh
+cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=$HOME/Desktop/sbb-investigation/sbb-rasta-stack
+cmake --build interop/sbb-wrapper/build
+./interop/sbb-wrapper/build/ping_pong_payload_test
+./interop/sbb-wrapper/build/udp_transport_test
+./interop/sbb-wrapper/build/sbb_adapter_bridge_test
+./interop/sbb-wrapper/build/sbb_safretl_smoke_test
+./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --run-seconds 5
+./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace --run-seconds 5
+```
+
+The CLI runtime log now says:
+
+```text
+Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed
+```
+
 ## CLI
 
 ```sh
@@ -174,10 +236,12 @@ Default port mapping:
 | active | channel 0 | `7100` | `7000` |
 | active | channel 1 | `7101` | `7001` |
 
-For now, the executable logs Step 8F RedL bridge smoke status, prints settings,
-opens two nonblocking UDP sockets, initializes RedL through `sradin_Init`, runs
-read/send smoke checks, closes sockets, and exits successfully. It does not call
-the SBB SafRetL API run loop and does not establish an SBB connection.
+For now, the executable logs Step 8G SafRetL run-loop smoke status, prints
+settings, opens two nonblocking UDP sockets, initializes the RedL adapter and
+SafRetL, runs `srapi_CheckTimings`/state/read polling for `--run-seconds`, and
+closes sockets. Active mode calls `srapi_OpenConnection`; sample Ping payloads
+are sent only if SafRetL reports `Up`. This still does not establish or claim
+Rust-to-SBB interoperability.
 
 ## Ping/Pong Payload
 
@@ -212,10 +276,10 @@ The function signatures have been aligned to the SBB public headers. If the SBB
 checkout is not provided, the wrapper keeps fallback definitions for standalone
 smoke builds.
 
-## Remaining Step 8G Work
+## Remaining Work After Step 8G
 
 - Keep the wrapper outside Rust protocol code.
+- Verify the Step 8G SafRetL smoke loop in Kali.
 - Implement bounded queues if SBB requires asynchronous adapter reads.
-- Integrate SBB SafRetL API calls: `srapi_Init`, `srapi_OpenConnection`, timing checks, send/read, and close.
 - Run an SBB-to-SBB wrapper baseline.
 - Preserve the current no-interop claim until a real SBB connection is observed.

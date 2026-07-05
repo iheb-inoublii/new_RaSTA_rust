@@ -21,13 +21,16 @@ if(SBB_WRAPPER_HAS_SBB_REDL)
     set(BUILD_TESTING OFF CACHE BOOL "Disable external SBB tests while embedding SBB libraries" FORCE)
     add_subdirectory("${SBB_ROOT}/source/modules/rasta_common" "${CMAKE_BINARY_DIR}/sbb-rasta-common")
     add_subdirectory("${SBB_ROOT}/source/modules/rasta_redundancy" "${CMAKE_BINARY_DIR}/sbb-rasta-redundancy")
+    add_subdirectory("${SBB_ROOT}/source/modules/rasta_safety_retransmission" "${CMAKE_BINARY_DIR}/sbb-rasta-safety-retransmission")
     set(BUILD_TESTING ${_sbb_wrapper_previous_build_testing} CACHE BOOL "Restore wrapper testing setting" FORCE)
 endif()
 
 add_library(sbb_wrapper_common OBJECT
     src/ping_pong_payload.c
     src/sbb_adapter.c
+    src/sbb_endpoint.c
     src/sbb_redundancy_notifications.c
+    src/sbb_safety_notifications.c
     src/sbb_system_adapter.c
     src/udp_transport.c
 )
@@ -45,7 +48,7 @@ if(SBB_WRAPPER_HAS_SBB_REDL)
             ${SBB_ROOT}/source/modules/rasta_redundancy/inc
             ${SBB_ROOT}/source/modules/rasta_safety_retransmission/inc
     )
-    target_link_libraries(sbb_wrapper_common PUBLIC rasta_redundancy rasta_common)
+    target_link_libraries(sbb_wrapper_common PUBLIC rasta_safety_retransmission rasta_redundancy rasta_common)
 endif()
 
 add_executable(sbb-rasta-wrapper
@@ -79,3 +82,11 @@ add_executable(sbb_adapter_bridge_test
 target_link_libraries(sbb_adapter_bridge_test PRIVATE sbb_wrapper_common)
 
 add_test(NAME sbb_adapter_bridge_test COMMAND sbb_adapter_bridge_test)
+
+add_executable(sbb_safretl_smoke_test
+    tests/sbb_safretl_smoke_test.c
+)
+
+target_link_libraries(sbb_safretl_smoke_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME sbb_safretl_smoke_test COMMAND sbb_safretl_smoke_test)
