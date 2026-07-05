@@ -352,6 +352,31 @@ The wrapper common target is now an object library so these integration objects
 are linked directly into `sbb-rasta-wrapper`, `sbb_adapter_bridge_test`, and the
 other wrapper smoke tests when `SBB_ROOT` is set.
 
+### Kali Validation Result
+
+The real Kali validation used:
+
+```sh
+cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=$HOME/Desktop/sbb-investigation/sbb-rasta-stack
+cmake --build interop/sbb-wrapper/build
+```
+
+Result:
+
+- Real SBB libraries linked successfully after adding callback/system adapters.
+- `ping_pong_payload_test` passed.
+- `udp_transport_test` passed.
+- `sbb_adapter_bridge_test` passed.
+- `sradin_Init` called `redint_Init` with result `0`.
+- `sradin_OpenRedundancyChannel` opened channel 0 with result `0`.
+- `redtri_SendMessage` sent transport 0 and transport 1 datagrams with length `36`.
+- `sradin_SendMessage` sent a 28-byte minimum SafRetL-like PDU with `redint_SendMessage result=0`.
+- `sradin_ReadMessage` returned `timing_result=0`, `read_result=1`, and `length=0`.
+- `sradin_CloseRedundancyChannel` closed channel 0 with result `0`.
+- Passive and active wrapper CLI smoke passed.
+- CLI smoke with the 5-byte dummy payload returns RedL result `17`, expected because it is not a valid/minimum SafRetL PDU.
+- No Rust-to-SBB interoperability is claimed.
+
 ## Step 8G Remaining Work
 
 1. Implement bounded receive queues for `sradin_ReadMessage` if SBB requires asynchronous adapter handoff.

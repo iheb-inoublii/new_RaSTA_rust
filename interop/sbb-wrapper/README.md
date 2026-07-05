@@ -142,6 +142,22 @@ Kali link-error cleanup:
 - `sbb_wrapper_common` is an object library so the adapter/callback objects are linked directly into `sbb-rasta-wrapper` and the wrapper test executables instead of being hidden behind a static archive.
 - The validated Kali `SBB_ROOT` path for this phase is `$HOME/Desktop/sbb-investigation/sbb-rasta-stack`.
 
+Verified Kali RedL bridge result:
+
+- Real SBB libraries linked successfully after adding callback/system adapters.
+- `ping_pong_payload_test` passed.
+- `udp_transport_test` passed.
+- `sbb_adapter_bridge_test` passed.
+- `sbb_adapter_bridge_test` showed `sradin_Init` -> `redint_Init result=0`.
+- Redundancy channel 0 opened with result `0`.
+- `redtri_SendMessage` sent transport 0 and transport 1 datagrams with length `36`.
+- `sradin_SendMessage` sent a 28-byte minimum SafRetL-like PDU through RedL with result `0`.
+- `sradin_ReadMessage` returned `timing_result=0`, `read_result=1`, `length=0`.
+- Redundancy channel 0 closed with result `0`.
+- Passive and active wrapper CLI smoke passed.
+- CLI smoke with the 5-byte dummy payload returns RedL result `17`, which is expected because it is not a valid/minimum SafRetL PDU.
+- Runtime log says Step 8F SBB RedL bridge smoke only; no Rust-to-SBB interop is claimed.
+
 ## CLI
 
 ```sh

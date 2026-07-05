@@ -68,7 +68,7 @@ The SBB transport notification function `redtrn_MessageReceivedNotification` was
 
 ## Current status
 
-Implemented in wrapper source. Kali CMake validation is required after this change is pushed or copied into the Kali checkout.
+Implemented and validated in Kali as RedL bridge smoke only. This is not Rust-to-SBB interoperability.
 
 ## Link-error cleanup
 
@@ -85,9 +85,31 @@ Added wrapper-side functions:
 
 The wrapper common target is now an object library so these implementations are linked directly into the final executable and smoke test targets.
 
+## Actual result
+
+- Real SBB_ROOT was used: `-DSBB_ROOT=$HOME/Desktop/sbb-investigation/sbb-rasta-stack`.
+- Real SBB libraries linked successfully after adding callback/system adapters.
+- `ping_pong_payload_test` passed.
+- `udp_transport_test` passed.
+- `sbb_adapter_bridge_test` passed.
+- `sbb_adapter_bridge_test` showed:
+
+  ```text
+  sradin_Init -> redint_Init result=0
+  sradin_OpenRedundancyChannel channel 0 result=0
+  redtri_SendMessage transport 0 length=36 sent
+  redtri_SendMessage transport 1 length=36 sent
+  sradin_SendMessage channel 0 length=28 redint_SendMessage result=0
+  sradin_ReadMessage timing_result=0 read_result=1 length=0
+  sradin_CloseRedundancyChannel channel 0 result=0
+  ```
+
+- Passive and active wrapper CLI smoke passed.
+- CLI smoke with the 5-byte dummy message returns result `17` from RedL, expected because it is not a valid/minimum SafRetL PDU.
+- Runtime log correctly says Step 8F SBB RedL bridge smoke only; no Rust-to-SBB interop is claimed.
+
 ## Open points
 
-- Validate `sbb_adapter_bridge_test` in Kali with the real SBB checkout.
 - Add bounded adapter queues if SafRetL requires asynchronous handoff.
 - Implement the SBB SafRetL API run loop.
 - Run an SBB-to-SBB wrapper baseline.
