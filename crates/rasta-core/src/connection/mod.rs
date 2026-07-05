@@ -18,7 +18,7 @@ use crate::connection::state_machine::{RastaState, StateMachine};
 use crate::connection::time_supervision::{
     ConfirmedTimestampDecision, TimeSupervisionError, TimeSupervisor,
 };
-use crate::port::{RandomError, RandomSource, Transport, TransportError};
+use crate::port::{RandomError, RandomSource, RastaTransport, TransportError};
 use crate::redundancy::{ChannelStatus, RedundancyLayer};
 use crate::serial;
 use crate::srl::DisconnectReason;
@@ -69,8 +69,8 @@ pub enum ConnectionError {
 }
 
 pub struct RastaConnection<
-    T1: Transport,
-    T2: Transport,
+    T1: RastaTransport,
+    T2: RastaTransport,
     C: MonotonicClock + ProtocolTimestampSource,
 > {
     pub state_machine: StateMachine,
@@ -117,7 +117,7 @@ pub struct RastaConnection<
     last_channel_statuses: [ChannelStatus; 2],
 }
 
-impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
+impl<T1: RastaTransport, T2: RastaTransport, C: MonotonicClock + ProtocolTimestampSource>
     RastaConnection<T1, T2, C>
 {
     pub fn try_new(

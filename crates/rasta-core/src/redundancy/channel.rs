@@ -1,4 +1,4 @@
-use crate::port::{Transport, TransportError};
+use crate::port::{RastaTransport, TransportError};
 use crate::time::{DurationMs, MonotonicInstant};
 
 use super::defer_queue::DeferQueue;
@@ -71,7 +71,15 @@ impl ChannelState {
     }
 }
 
-pub struct RedundancyLayer<T1: Transport, T2: Transport> {
+/// Redundancy-layer manager with one independent transport instance per channel.
+///
+/// `T1` and `T2` are separate generic parameters, so channel 0 and channel 1
+/// can use different concrete transport implementations. For example, a
+/// platform crate can pair an OS UDP transport on channel 0 with a custom raw
+/// socket or embedded Ethernet adapter on channel 1. When runtime selection is
+/// needed, users can provide their own enum or wrapper that implements
+/// `RastaTransport` and delegates to the selected transport.
+pub struct RedundancyLayer<T1: RastaTransport, T2: RastaTransport> {
     transport_a: T1,
     transport_b: T2,
     config: RedundancyConfig,
@@ -80,7 +88,7 @@ pub struct RedundancyLayer<T1: Transport, T2: Transport> {
     channels: [ChannelState; 2],
 }
 
-impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
+impl<T1: RastaTransport, T2: RastaTransport> RedundancyLayer<T1, T2> {
     pub const HEADER_SIZE: usize = HEADER_SIZE;
 
     pub fn new(transport_a: T1, transport_b: T2) -> Self {
@@ -685,6 +693,50 @@ mod tests {
     }
 
     #[test]
+    fn different_transport_types_can_be_assigned_per_redundancy_channel() {
+        struct UdpLikeMock(Rc<Cell<u8>>);
+        struct RawLikeMock(Rc<Cell<u8>>);
+
+        impl Transport for UdpLikeMock {
+            fn send(&mut self, _data: &[u8]) -> Result<(), TransportError> {
+                self.0.set(self.0.get().saturating_add(1));
+                Ok(())
+            }
+
+            fn receive(&mut self, _data: &mut [u8]) -> Result<usize, TransportError> {
+                Ok(0)
+            }
+        }
+
+        impl Transport for RawLikeMock {
+            fn send(&mut self, _data: &[u8]) -> Result<(), TransportError> {
+                self.0.set(self.0.get().saturating_add(1));
+                Ok(())
+            }
+
+            fn receive(&mut self, _data: &mut [u8]) -> Result<usize, TransportError> {
+                Ok(0)
+            }
+        }
+
+        let udp_calls = Rc::new(Cell::new(0));
+        let raw_calls = Rc::new(Cell::new(0));
+        let mut layer = RedundancyLayer::with_config(
+            UdpLikeMock(udp_calls.clone()),
+            RawLikeMock(raw_calls.clone()),
+            no_crc(),
+        );
+
+        assert_eq!(layer.send(b"frame"), Ok(()));
+        assert_eq!(udp_calls.get(), 1);
+        assert_eq!(raw_calls.get(), 1);
+        assert_eq!(
+            layer.channel_statuses(),
+            [ChannelStatus::Healthy, ChannelStatus::Healthy]
+        );
+    }
+
+    #[test]
     fn single_channel_send_failure_degrades_only_that_channel() {
         let mut layer = RedundancyLayer::with_config(
             MockTransport {
@@ -785,6 +837,18 @@ mod tests {
                 .channel_counters(ChannelId::Channel0)
                 .receive_failure_count,
             1
+        );
+    }
+
+    #[test]
+    fn receive_no_data_on_both_channels_is_not_fatal() {
+        let mut layer =
+            RedundancyLayer::with_config(MockTransport::empty(), MockTransport::empty(), no_crc());
+
+        assert_eq!(layer.receive(&mut [0u8; 8]), Ok(0));
+        assert_eq!(
+            layer.channel_statuses(),
+            [ChannelStatus::Unknown, ChannelStatus::Unknown]
         );
     }
 

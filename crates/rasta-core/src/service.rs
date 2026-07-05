@@ -1,6 +1,6 @@
 use crate::connection::state_machine::RastaState;
 use crate::connection::{ConnectionError, RastaConfig, RastaConnection, TimestampTraceEvent};
-use crate::port::{RandomSource, Transport};
+use crate::port::{RandomSource, RastaTransport};
 use crate::srl::DiagnosticEvent;
 use crate::time::{MonotonicClock, ProtocolTimestampSource};
 
@@ -27,13 +27,17 @@ impl From<RastaState> for ConnectionStatus {
     }
 }
 
-pub struct RastaService<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource> {
+pub struct RastaService<
+    T1: RastaTransport,
+    T2: RastaTransport,
+    C: MonotonicClock + ProtocolTimestampSource,
+> {
     connection: RastaConnection<T1, T2, C>,
 }
 
 pub type RastaApi<T1, T2, C> = RastaService<T1, T2, C>;
 
-impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
+impl<T1: RastaTransport, T2: RastaTransport, C: MonotonicClock + ProtocolTimestampSource>
     RastaService<T1, T2, C>
 {
     pub fn new(
