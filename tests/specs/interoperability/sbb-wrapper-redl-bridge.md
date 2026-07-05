@@ -70,6 +70,21 @@ The SBB transport notification function `redtrn_MessageReceivedNotification` was
 
 Implemented in wrapper source. Kali CMake validation is required after this change is pushed or copied into the Kali checkout.
 
+## Link-error cleanup
+
+Kali configure found `SBB_ROOT` at `$HOME/Desktop/sbb-investigation/sbb-rasta-stack`, but the first real SBB link failed with undefined references from SBB to integrator-provided functions.
+
+Added wrapper-side functions:
+
+- `rasys_GetTimerValue`
+- `rasys_GetTimerGranularity`
+- `rasys_GetRandomNumber`
+- `rasys_FatalError`
+- `rednot_MessageReceivedNotification`
+- `rednot_DiagnosticNotification`
+
+The wrapper common target is now an object library so these implementations are linked directly into the final executable and smoke test targets.
+
 ## Open points
 
 - Validate `sbb_adapter_bridge_test` in Kali with the real SBB checkout.
@@ -83,5 +98,6 @@ Implemented in wrapper source. Kali CMake validation is required after this chan
 - `interop/sbb-wrapper/src/sbb_adapter.c`
 - `interop/sbb-wrapper/src/sbb_adapter.h`
 - `interop/sbb-wrapper/src/sbb_system_adapter.c`
+- `interop/sbb-wrapper/src/sbb_redundancy_notifications.c`
 - `interop/sbb-wrapper/tests/sbb_adapter_bridge_test.c`
 - `interop/sbb-wrapper/CMakeLists.txt`

@@ -329,6 +329,29 @@ channel 0, sends a deterministic minimum-size SafRetL-like buffer through
 `sradin_SendMessage`, verifies the read path returns either no-message or a
 successful read without crashing, closes the channel, and closes UDP.
 
+### Link-Error Cleanup
+
+Kali configure found the real SBB checkout at
+`$HOME/Desktop/sbb-investigation/sbb-rasta-stack`, but the first real RedL link
+failed because SBB requires integrator-provided notification and system adapter
+symbols.
+
+Implemented wrapper-side callbacks:
+
+- `rednot_MessageReceivedNotification`
+- `rednot_DiagnosticNotification`
+
+Implemented wrapper-side system adapter functions:
+
+- `rasys_GetTimerValue`
+- `rasys_GetTimerGranularity`
+- `rasys_GetRandomNumber`
+- `rasys_FatalError`
+
+The wrapper common target is now an object library so these integration objects
+are linked directly into `sbb-rasta-wrapper`, `sbb_adapter_bridge_test`, and the
+other wrapper smoke tests when `SBB_ROOT` is set.
+
 ## Step 8G Remaining Work
 
 1. Implement bounded receive queues for `sradin_ReadMessage` if SBB requires asynchronous adapter handoff.

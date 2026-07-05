@@ -35,6 +35,13 @@ typedef enum {
     radef_kInvalidOperationInCurrentState = 17
 } radef_RaStaReturnCode;
 
+typedef struct {
+    uint32_t n_diagnosis;
+    uint32_t n_missed;
+    uint32_t t_drift;
+    uint32_t t_drift2;
+} radef_TransportChannelDiagnosticData;
+
 void sradin_Init(void);
 void sradin_OpenRedundancyChannel(uint32_t redundancy_channel_id);
 void sradin_CloseRedundancyChannel(uint32_t redundancy_channel_id);

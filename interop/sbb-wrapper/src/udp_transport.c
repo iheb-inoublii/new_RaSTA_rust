@@ -180,6 +180,11 @@ int sbb_wrapper_udp_is_initialized(void)
     return g_initialized;
 }
 
+int sbb_wrapper_udp_trace_enabled(void)
+{
+    return g_trace;
+}
+
 static SbbWrapperUdpRuntimeChannel *runtime_channel(uint32_t transport_channel_id)
 {
     if (transport_channel_id >= SBB_WRAPPER_UDP_CHANNEL_COUNT) {

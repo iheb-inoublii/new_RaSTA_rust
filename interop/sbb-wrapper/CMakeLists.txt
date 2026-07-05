@@ -24,9 +24,10 @@ if(SBB_WRAPPER_HAS_SBB_REDL)
     set(BUILD_TESTING ${_sbb_wrapper_previous_build_testing} CACHE BOOL "Restore wrapper testing setting" FORCE)
 endif()
 
-add_library(sbb_wrapper_common
+add_library(sbb_wrapper_common OBJECT
     src/ping_pong_payload.c
     src/sbb_adapter.c
+    src/sbb_redundancy_notifications.c
     src/sbb_system_adapter.c
     src/udp_transport.c
 )

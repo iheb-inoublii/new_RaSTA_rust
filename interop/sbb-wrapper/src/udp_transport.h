@@ -30,6 +30,7 @@ void sbb_wrapper_udp_print_config(const SbbWrapperUdpConfig *config);
 int sbb_wrapper_udp_init(const SbbWrapperUdpConfig *config);
 void sbb_wrapper_udp_close(void);
 int sbb_wrapper_udp_is_initialized(void);
+int sbb_wrapper_udp_trace_enabled(void);
 SbbWrapperUdpResult sbb_wrapper_udp_send(uint32_t transport_channel_id, const uint8_t *message, size_t length);
 SbbWrapperUdpResult sbb_wrapper_udp_receive(
     uint32_t transport_channel_id,

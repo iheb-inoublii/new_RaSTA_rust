@@ -134,6 +134,14 @@ Bridge smoke test command:
 ./interop/sbb-wrapper/build/sbb_adapter_bridge_test
 ```
 
+Kali link-error cleanup:
+
+- Real SBB linking previously failed with undefined `rednot_MessageReceivedNotification`, `rednot_DiagnosticNotification`, `rasys_FatalError`, and `rasys_GetTimerValue`.
+- The wrapper now implements the required RedL notification callbacks in `src/sbb_redundancy_notifications.c`.
+- The wrapper implements SBB system adapter functions in `src/sbb_system_adapter.c`.
+- `sbb_wrapper_common` is an object library so the adapter/callback objects are linked directly into `sbb-rasta-wrapper` and the wrapper test executables instead of being hidden behind a static archive.
+- The validated Kali `SBB_ROOT` path for this phase is `$HOME/Desktop/sbb-investigation/sbb-rasta-stack`.
+
 ## CLI
 
 ```sh
