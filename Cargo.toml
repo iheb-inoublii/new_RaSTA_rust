@@ -6,4 +6,5 @@ members = [
     "apps/rasta-node",
     "apps/signal-controller",
     "apps/interlocking-controller",
+    "apps/ping-pong-node",
 ]

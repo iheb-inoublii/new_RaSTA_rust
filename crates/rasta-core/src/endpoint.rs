@@ -355,6 +355,10 @@ mod tests {
         fn new(now: u32) -> Self {
             Self(Rc::new(Cell::new(now)))
         }
+
+        fn advance(&self, delta_ms: u32) {
+            self.0.set(self.0.get().wrapping_add(delta_ms));
+        }
     }
 
     impl MonotonicClock for FakeClock {
@@ -765,6 +769,127 @@ mod tests {
             ApplicationMessage::decode(&received[..len]),
             Ok(ApplicationMessage::Pong { counter: 1 })
         );
+    }
+
+    #[test]
+    fn rust_to_rust_ping_pong_repeats_bidirectional_messages_and_disconnects_cleanly() {
+        const ROUNDS: u32 = 100;
+        let (mut a, mut b, clock) = endpoint_pair();
+        a.connect().unwrap();
+        b.connect().unwrap();
+        poll_pair(&mut a, &mut b, 8);
+        assert_eq!(a.status(), ConnectionStatus::Up);
+        assert_eq!(b.status(), ConnectionStatus::Up);
+
+        let mut encoded = [0u8; ApplicationMessage::MAX_ENCODED_LEN];
+        let mut received = [0u8; ApplicationMessage::MAX_ENCODED_LEN];
+        let mut next_ping_to_send = 1u32;
+        let mut next_ping_expected_by_b = 1u32;
+        let mut next_pong_expected_by_a = 1u32;
+        let mut duplicate_ping_detected = false;
+        let mut duplicate_pong_detected = false;
+        let mut malformed_detected = false;
+        let mut timeout_detected = false;
+
+        while next_pong_expected_by_a <= ROUNDS {
+            if next_ping_to_send <= ROUNDS {
+                let len = ApplicationMessage::Ping {
+                    counter: next_ping_to_send,
+                }
+                .encode(&mut encoded)
+                .unwrap();
+                a.send(&encoded[..len]).unwrap();
+                next_ping_to_send += 1;
+            }
+
+            for _ in 0..6 {
+                clock.advance(100);
+                if a.poll() == Err(RastaError::SafetyTimeout) {
+                    timeout_detected = true;
+                }
+                if b.poll() == Err(RastaError::SafetyTimeout) {
+                    timeout_detected = true;
+                }
+            }
+
+            while b.has_received_data() {
+                let len = b.receive(&mut received).unwrap();
+                match ApplicationMessage::decode(&received[..len]) {
+                    Ok(ApplicationMessage::Ping { counter }) => {
+                        if counter != next_ping_expected_by_b {
+                            duplicate_ping_detected = true;
+                        }
+                        next_ping_expected_by_b = counter.saturating_add(1);
+                        let len = ApplicationMessage::Pong { counter }
+                            .encode(&mut encoded)
+                            .unwrap();
+                        b.send(&encoded[..len]).unwrap();
+                    }
+                    Ok(_) | Err(_) => malformed_detected = true,
+                }
+            }
+
+            for _ in 0..4 {
+                clock.advance(100);
+                if a.poll() == Err(RastaError::SafetyTimeout) {
+                    timeout_detected = true;
+                }
+                if b.poll() == Err(RastaError::SafetyTimeout) {
+                    timeout_detected = true;
+                }
+            }
+
+            while a.has_received_data() {
+                let len = a.receive(&mut received).unwrap();
+                match ApplicationMessage::decode(&received[..len]) {
+                    Ok(ApplicationMessage::Pong { counter }) => {
+                        if counter != next_pong_expected_by_a {
+                            duplicate_pong_detected = true;
+                        }
+                        next_pong_expected_by_a = counter.saturating_add(1);
+                    }
+                    Ok(_) | Err(_) => malformed_detected = true,
+                }
+            }
+        }
+
+        assert_eq!(next_ping_expected_by_b, ROUNDS + 1);
+        assert_eq!(next_pong_expected_by_a, ROUNDS + 1);
+        assert!(!duplicate_ping_detected);
+        assert!(!duplicate_pong_detected);
+        assert!(!malformed_detected);
+        assert!(!timeout_detected);
+        assert!(
+            drain(&mut a)
+                .into_iter()
+                .any(|event| matches!(event, RastaTraceEvent::HeartbeatSent))
+        );
+
+        a.drain_diagnostics(|diagnostic| {
+            assert_ne!(
+                diagnostic.kind,
+                crate::srl::DiagnosticKind::ConnectionTimeout
+            );
+            assert_ne!(
+                diagnostic.kind,
+                crate::srl::DiagnosticKind::MalformedMessage
+            );
+        });
+        b.drain_diagnostics(|diagnostic| {
+            assert_ne!(
+                diagnostic.kind,
+                crate::srl::DiagnosticKind::ConnectionTimeout
+            );
+            assert_ne!(
+                diagnostic.kind,
+                crate::srl::DiagnosticKind::MalformedMessage
+            );
+        });
+
+        a.close().unwrap();
+        poll_pair(&mut a, &mut b, 8);
+        assert_eq!(a.status(), ConnectionStatus::Down);
+        assert_eq!(b.status(), ConnectionStatus::Down);
     }
 
     #[test]

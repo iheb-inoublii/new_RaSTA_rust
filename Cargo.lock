@@ -11,6 +11,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ping-pong-node"
+version = "0.1.0"
+dependencies = [
+ "rasta-core",
+ "rasta-platform",
+]
+
+[[package]]
 name = "rasta-core"
 version = "0.1.0"
 
