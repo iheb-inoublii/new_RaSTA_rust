@@ -1,12 +1,9 @@
 mod profile;
 
 use profile::{DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE};
-use rasta_core::config::{RastaConfig, SafetyCodeLength};
 use rasta_core::connection::TimestampTraceEvent;
-use rasta_core::connection::safety_code::SafetyCodeConfig;
+use rasta_core::endpoint::{ConnectionStatus, RastaEndpoint, config_from_profile};
 use rasta_core::port::{Transport, TransportError};
-use rasta_core::redundancy::{RedundancyCheckCode, RedundancyConfig, RedundancyCrc};
-use rasta_core::service::{ConnectionStatus, RastaService};
 use rasta_platform::std_clock::StdClock;
 use rasta_platform::udp::UdpSocketTransport;
 use std::cell::Cell;
@@ -470,50 +467,34 @@ fn main() {
         eprintln!("Invalid interoperability-test profile: {:?}", error);
         return;
     }
-    let config = RastaConfig {
-        sender_id: settings.sender_id,
-        remote_id: settings.remote_id,
-        safety_code: match profile.safety_code_length {
-            SafetyCodeLength::None => SafetyCodeConfig::none(),
-            SafetyCodeLength::Md4Lower8 => SafetyCodeConfig::md4_low8(profile.md4_initial_value),
-            SafetyCodeLength::Md4Full16 => SafetyCodeConfig {
-                mode: rasta_core::connection::safety_code::SafetyCodeMode::Md4Full16,
-                md4_initial_value: profile.md4_initial_value,
-            },
-        },
-        redundancy: RedundancyConfig {
-            check_code: match profile.redundancy_crc {
-                RedundancyCrc::OptionA => RedundancyCheckCode::OptionA,
-                RedundancyCrc::OptionB => RedundancyCheckCode::OptionB,
-                RedundancyCrc::OptionC => RedundancyCheckCode::OptionC,
-                RedundancyCrc::OptionD => RedundancyCheckCode::OptionD,
-                RedundancyCrc::OptionE => RedundancyCheckCode::OptionE,
-            },
-            t_seq_ms: profile.t_seq_ms,
-        },
-        t_max: profile.t_max_ms,
-        initial_seq: 0,
-        heartbeat_interval_ms: profile.t_h_ms,
-        n_send_max: profile.n_send_max as u16,
-        mwa: profile.mwa as u16,
-        allow_unsafe_no_checksums: settings.profile == RuntimeProfile::LibrastaLocal,
-        timestamp_compatibility: profile.timestamp_compatibility,
-    };
-
-    let mut api = match RastaService::new(transport_a, transport_b, StdClock::new(), config) {
-        Ok(api) => api,
+    let config = match config_from_profile(
+        settings.sender_id,
+        settings.remote_id,
+        profile,
+        settings.profile == RuntimeProfile::LibrastaLocal,
+    ) {
+        Ok(config) => config,
         Err(error) => {
-            eprintln!("Invalid RaSTA configuration: {:?}", error);
+            eprintln!("Invalid RaSTA profile configuration: {:?}", error);
             return;
         }
     };
+
+    let mut api =
+        match RastaEndpoint::from_config(transport_a, transport_b, StdClock::new(), config) {
+            Ok(api) => api,
+            Err(error) => {
+                eprintln!("Invalid RaSTA configuration: {:?}", error);
+                return;
+            }
+        };
 
     if settings.role == NodeRole::A {
         println!("Opening client connection...");
     } else {
         println!("Opening server connection...");
     }
-    if let Err(error) = api.open_connection() {
+    if let Err(error) = api.connect() {
         eprintln!("Failed to open connection: {:?}", error);
         return;
     }
@@ -527,20 +508,14 @@ fn main() {
     loop {
         if let Err(e) = api.poll() {
             println!("Error during poll: {:?}", e);
-            while let Some(diagnostic) = api.take_diagnostic() {
-                eprintln!("RaSTA diagnostic: {:?}", diagnostic);
-            }
+            api.drain_diagnostics(|diagnostic| eprintln!("RaSTA diagnostic: {:?}", diagnostic));
             if settings.trace_wire {
-                while let Some(event) = api.take_timestamp_trace() {
-                    log_timestamp_trace(event);
-                }
+                api.drain_trace_events(log_timestamp_trace);
             }
             break;
         }
         if settings.trace_wire {
-            while let Some(event) = api.take_timestamp_trace() {
-                log_timestamp_trace(event);
-            }
+            api.drain_trace_events(log_timestamp_trace);
         }
 
         let current_state = api.status();
@@ -562,7 +537,7 @@ fn main() {
 
         if settings.role == NodeRole::B && api.has_received_data() {
             let mut data = [0u8; 256];
-            match api.receive_data(&mut data) {
+            match api.receive(&mut data) {
                 Ok(length) => match std::str::from_utf8(&data[..length]) {
                     Ok(text) => println!("Received data: {text:?}"),
                     Err(_) => println!("Received {length} non-UTF-8 data bytes"),
@@ -573,7 +548,7 @@ fn main() {
 
         if current_state == ConnectionStatus::Up && settings.role == NodeRole::A && !data_sent {
             println!("Sending data: 'Hello from A'");
-            if let Err(error) = api.send_data(b"Hello from A") {
+            if let Err(error) = api.send(b"Hello from A") {
                 eprintln!("Failed to send data: {:?}", error);
                 break;
             }
@@ -590,7 +565,7 @@ fn main() {
 
         if settings.role == NodeRole::A && data_sent && selected_duration_expired {
             println!("Graceful disconnect...");
-            if let Err(error) = api.close_connection() {
+            if let Err(error) = api.close() {
                 eprintln!("Failed to disconnect: {:?}", error);
             }
             break;
