@@ -103,7 +103,20 @@ Run wrapper CLI smoke tests:
 
 ## Actual result
 
-Pending Kali validation.
+- Real SBB_ROOT was used: `-DSBB_ROOT=$HOME/Desktop/sbb-investigation/sbb-rasta-stack`.
+- CMake configure passed.
+- CMake build passed.
+- The build created `ping_pong_payload_test`, `udp_transport_test`, `sbb_adapter_bridge_test`, `sbb_safretl_smoke_test`, and `sbb-rasta-wrapper`.
+- `ping_pong_payload_test` passed.
+- `udp_transport_test` passed.
+- `sbb_adapter_bridge_test` passed.
+- `sbb_safretl_smoke_test` passed.
+- `sbb_safretl_smoke_test` showed that the `srapi_Init` path works.
+- RedL bridge sent UDP frames with lengths `58` and `48`.
+- `sradin_SendMessage` sent lengths `50` and `40` with result `0`.
+- Passive single-process smoke reported `srapi_Init result=0`, stayed `Closed` because no active peer was running, and shut down cleanly.
+- Active single-process smoke reported `srapi_Init result=0` and `srapi_OpenConnection result=0`, sent length `58` and `48` frames, moved `Start` then `Closed` because no passive peer was running at the same time, and shut down cleanly.
+- Runtime log correctly says Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed.
 
 ## Postconditions
 
@@ -127,7 +140,6 @@ Partially automated. Rust validation can run on Windows. SBB wrapper configure, 
 
 ## Open points
 
-- Validate Step 8G in Kali.
 - Add bounded queues if SBB requires asynchronous adapter handoff.
 - Run an SBB-to-SBB wrapper baseline.
 - Do not attempt Rust-to-SBB until SBB-to-SBB wrapper behavior is understood.

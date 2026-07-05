@@ -436,10 +436,34 @@ New smoke test:
 ./interop/sbb-wrapper/build/sbb_safretl_smoke_test
 ```
 
+### Kali Validation Result
+
+The real Kali validation used:
+
+```sh
+cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=$HOME/Desktop/sbb-investigation/sbb-rasta-stack
+cmake --build interop/sbb-wrapper/build
+```
+
+Result:
+
+- CMake configure passed with real `SBB_ROOT`.
+- CMake build passed.
+- The build created `ping_pong_payload_test`, `udp_transport_test`, `sbb_adapter_bridge_test`, `sbb_safretl_smoke_test`, and `sbb-rasta-wrapper`.
+- `ping_pong_payload_test` passed.
+- `udp_transport_test` passed.
+- `sbb_adapter_bridge_test` passed.
+- `sbb_safretl_smoke_test` passed.
+- `sbb_safretl_smoke_test` showed that the `srapi_Init` path works.
+- The RedL bridge sent UDP frames with lengths `58` and `48`.
+- `sradin_SendMessage` sent lengths `50` and `40` with result `0`.
+- Passive single-process smoke reported `srapi_Init result=0`, stayed `Closed` because no active peer was running, and shut down cleanly.
+- Active single-process smoke reported `srapi_Init result=0` and `srapi_OpenConnection result=0`, sent length `58` and `48` frames, moved `Start` then `Closed` because no passive peer was running at the same time, and shut down cleanly.
+- Runtime log says Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed.
+
 ## Remaining Work After Step 8G
 
 1. Implement bounded receive queues for `sradin_ReadMessage` if SBB requires asynchronous adapter handoff.
-2. Verify Step 8G in Kali with the real SBB checkout.
-3. Run an SBB-to-SBB wrapper baseline before Rust-to-SBB.
-4. Run Rust active to SBB passive with captured traces.
-5. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.
+2. Run an SBB-to-SBB wrapper baseline before Rust-to-SBB.
+3. Run Rust active to SBB passive with captured traces.
+4. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.
