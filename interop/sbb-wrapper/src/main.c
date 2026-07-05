@@ -153,28 +153,28 @@ static void run_stub_smoke_checks(void)
     uint8_t payload[SBB_WRAPPER_PING_PONG_PAYLOAD_LEN] = {0};
     uint8_t receive_buffer[128] = {0};
     size_t payload_length = 0;
-    size_t received_length = 0;
-    RadefReturnCode result;
+    uint16_t received_length = 0;
+    radef_RaStaReturnCode result;
 
     if (sbb_wrapper_encode_ping(1u, payload, sizeof(payload), &payload_length) == SBB_WRAPPER_PAYLOAD_OK) {
-        result = sradin_SendMessage(0u, payload, payload_length);
-        printf("[sbb-wrapper] sradin_SendMessage smoke result=%d\n", result);
+        sradin_SendMessage(0u, (uint16_t)payload_length, payload);
+        puts("[sbb-wrapper] sradin_SendMessage smoke invoked");
 
-        result = redtri_SendMessage(0u, payload, payload_length);
-        printf("[sbb-wrapper] redtri_SendMessage smoke result=%d\n", result);
+        redtri_SendMessage(0u, (uint16_t)payload_length, payload);
+        puts("[sbb-wrapper] redtri_SendMessage smoke invoked");
     }
 
-    result = sradin_ReadMessage(0u, receive_buffer, sizeof(receive_buffer), &received_length);
+    result = sradin_ReadMessage(0u, (uint16_t)sizeof(receive_buffer), &received_length, receive_buffer);
     printf(
         "[sbb-wrapper] sradin_ReadMessage smoke result=%d length=%zu\n",
         result,
-        received_length);
+        (size_t)received_length);
 
-    result = redtri_ReadMessage(0u, receive_buffer, sizeof(receive_buffer), &received_length);
+    result = redtri_ReadMessage(0u, (uint16_t)sizeof(receive_buffer), &received_length, receive_buffer);
     printf(
         "[sbb-wrapper] redtri_ReadMessage smoke result=%d length=%zu\n",
         result,
-        received_length);
+        (size_t)received_length);
 }
 
 int main(int argc, char **argv)
@@ -191,16 +191,15 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    puts("[sbb-wrapper] Step 8E UDP transport smoke only; no SBB interop is claimed");
+    puts("[sbb-wrapper] Step 8F SBB RedL bridge smoke only; no Rust-to-SBB interop is claimed");
     print_settings(&settings);
 
     if (sbb_wrapper_udp_init(&settings.udp) != 0) {
         return 1;
     }
 
-    if (sradin_Init() != radef_kOk || redtri_Init() != radef_kOk) {
-        return 1;
-    }
+    redtri_Init();
+    sradin_Init();
 
     run_stub_smoke_checks();
 

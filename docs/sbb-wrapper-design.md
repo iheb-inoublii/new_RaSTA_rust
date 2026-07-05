@@ -178,7 +178,7 @@ Current files:
 - `README.md`: skeleton status, build command, CLI examples, and stub list.
 - `CMakeLists.txt`: standalone CMake project that accepts `SBB_ROOT` but does not link SBB yet and builds `sbb-rasta-wrapper`.
 - `src/main.c`: active/passive CLI parser and deterministic settings logging.
-- `src/sbb_adapter.h` / `src/sbb_adapter.c`: required `sradin_*` symbols as logged stubs and `redtri_*` functions connected to wrapper UDP transport.
+- `src/sbb_adapter.h` / `src/sbb_adapter.c`: required `sradin_*` symbols connected to SBB RedL when `SBB_ROOT` is provided, plus `redtri_*` functions connected to wrapper UDP transport.
 - `src/udp_transport.h` / `src/udp_transport.c`: two-channel POSIX UDP transport for Kali/Linux.
 - `src/ping_pong_payload.h` / `src/ping_pong_payload.c`: Ping/Pong codec compatible with Rust `ApplicationMessage`.
 - `tests/ping_pong_payload_test.c`: C codec smoke test.
@@ -229,7 +229,7 @@ Actual Kali result:
 Skeleton fixes made during Step 8D:
 
 - Renamed the CMake executable target to `sbb-rasta-wrapper` to match the smoke-test command.
-- Added explicit CLI smoke calls for send/read stubs so `radef_kNotImplemented` and `radef_kNoMessageReceived` behavior is visible in wrapper output.
+- Added explicit CLI smoke calls for the Step 8D send/read stubs so no-message behavior was visible in wrapper output.
 
 ## Step 8E UDP Transport
 
@@ -253,7 +253,7 @@ RedL adapter connection:
 - `redtri_Init` checks that UDP is initialized.
 - `redtri_SendMessage` delegates to `sbb_wrapper_udp_send`.
 - `redtri_ReadMessage` delegates to `sbb_wrapper_udp_receive`.
-- `sradin_*` functions remain SafRetL skeleton stubs.
+- At Step 8E, `sradin_*` functions still remained SafRetL skeleton stubs.
 
 New wrapper test:
 
@@ -276,38 +276,63 @@ Actual Kali result:
 - UDP sockets opened and closed correctly.
 - `redtri_SendMessage` sends through UDP and returns success.
 - `redtri_ReadMessage` returns no message when empty.
-- `sradin_*` remains skeleton/stubbed.
+- At Step 8E, `sradin_*` remained skeleton/stubbed.
 - No Rust-to-SBB interoperability is claimed.
 
 ## Current Status
 
-The wrapper is a compile-ready skeleton with real UDP transport only.
+The wrapper is a compile-ready skeleton with real UDP transport and an internal
+SafRetL adapter to SBB RedL bridge.
 
 Implemented:
 
 - CLI parsing for `active` / `passive`, remote IP, `--rounds`, `--run-seconds`, `--trace`, and both channel local/remote ports.
 - Default local port mapping for passive SBB (`7000/7001` local, `7100/7101` remote) and active SBB (`7100/7101` local, `7000/7001` remote).
-- Logged stubs for `sradin_Init`, `sradin_OpenRedundancyChannel`, `sradin_CloseRedundancyChannel`, `sradin_SendMessage`, and `sradin_ReadMessage`.
+- SBB-compatible signatures for `sradin_*` and `redtri_*`.
+- Internal bridge from `sradin_*` to SBB RedL public APIs.
 - Real UDP-backed behavior for `redtri_Init`, `redtri_SendMessage`, and `redtri_ReadMessage`.
-- Read stubs return `radef_kNoMessageReceived` when no queue exists.
-- SafRetL send stubs return `radef_kNotImplemented` rather than pretending to send data.
+- `sradin_ReadMessage` returns `radef_kNoMessageReceived` when RedL has no queued message.
 - CLI smoke runs open sockets, print send/read statuses, and close sockets before exiting successfully.
 - Ping/Pong payload encoding and decoding using tag `0x03` / `0x04` plus little-endian `u32`.
 
 Stubbed:
 
 - SBB SafRetL APIs are not called yet.
-- SBB libraries are not linked yet.
-- Exact SBB adapter function signatures still need confirmation against SBB headers.
 - No connection, heartbeat, retransmission, or safety-code behavior is exercised.
 
-## Step 8F Remaining Work
+## Step 8F RedL Bridge
 
-1. Confirm exact SBB function signatures and return-code names from the SBB headers.
-2. Replace skeleton adapter signatures if needed to match SBB exactly.
-3. Link the wrapper against the external SBB libraries using `SBB_ROOT`.
-4. Implement bounded receive queues for `sradin_ReadMessage` if SBB requires them.
-5. Call SBB initialization, timing, open, send, receive, state, and close APIs from the wrapper loop.
-6. Run an SBB-to-SBB wrapper baseline before Rust-to-SBB.
-7. Run Rust active to SBB passive with captured traces.
-8. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.
+The wrapper uses these exact SBB RedL public functions from
+`rasta_redundancy/redint_red_interface.h`:
+
+- `redint_Init`
+- `redint_OpenRedundancyChannel`
+- `redint_CloseRedundancyChannel`
+- `redint_SendMessage`
+- `redint_ReadMessage`
+- `redint_CheckTimings`
+
+The transport notification entry point
+`redtrn_MessageReceivedNotification` was inspected in
+`rasta_redundancy/redtrn_transport_notifications.h`. The wrapper currently uses
+`redint_CheckTimings` to let RedL poll pending transport messages before
+`redint_ReadMessage`.
+
+New bridge test:
+
+```sh
+./interop/sbb-wrapper/build/sbb_adapter_bridge_test
+```
+
+The test initializes wrapper UDP, initializes the RedL bridge, opens redundancy
+channel 0, sends a deterministic minimum-size SafRetL-like buffer through
+`sradin_SendMessage`, verifies the read path returns either no-message or a
+successful read without crashing, closes the channel, and closes UDP.
+
+## Step 8G Remaining Work
+
+1. Implement bounded receive queues for `sradin_ReadMessage` if SBB requires asynchronous adapter handoff.
+2. Call SBB SafRetL initialization, timing, open, send, receive, state, and close APIs from the wrapper loop.
+3. Run an SBB-to-SBB wrapper baseline before Rust-to-SBB.
+4. Run Rust active to SBB passive with captured traces.
+5. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.

@@ -71,7 +71,7 @@ Implemented and validated in Kali.
 - UDP sockets opened and closed correctly.
 - `redtri_SendMessage` sends through UDP and returns success.
 - `redtri_ReadMessage` returns no message when empty.
-- `sradin_*` remains skeleton/stubbed.
+- Step 8F supersedes the adapter status: `sradin_*` now bridges to SBB RedL when `SBB_ROOT` is provided.
 - No Rust-to-SBB interoperability is claimed.
 
 ## Open points

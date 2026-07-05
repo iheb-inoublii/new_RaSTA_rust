@@ -8,15 +8,26 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 set(SBB_ROOT "" CACHE PATH "Path to an external SBB RaSTA stack checkout")
 
-if(SBB_ROOT)
+if(SBB_ROOT AND EXISTS "${SBB_ROOT}/source/modules/rasta_redundancy/CMakeLists.txt")
     message(STATUS "SBB_ROOT=${SBB_ROOT}")
+    set(SBB_WRAPPER_HAS_SBB_REDL TRUE)
 else()
     message(WARNING "SBB_ROOT is not set. Building skeleton stubs only; no SBB libraries are linked.")
+    set(SBB_WRAPPER_HAS_SBB_REDL FALSE)
+endif()
+
+if(SBB_WRAPPER_HAS_SBB_REDL)
+    set(_sbb_wrapper_previous_build_testing ${BUILD_TESTING})
+    set(BUILD_TESTING OFF CACHE BOOL "Disable external SBB tests while embedding SBB libraries" FORCE)
+    add_subdirectory("${SBB_ROOT}/source/modules/rasta_common" "${CMAKE_BINARY_DIR}/sbb-rasta-common")
+    add_subdirectory("${SBB_ROOT}/source/modules/rasta_redundancy" "${CMAKE_BINARY_DIR}/sbb-rasta-redundancy")
+    set(BUILD_TESTING ${_sbb_wrapper_previous_build_testing} CACHE BOOL "Restore wrapper testing setting" FORCE)
 endif()
 
 add_library(sbb_wrapper_common
     src/ping_pong_payload.c
     src/sbb_adapter.c
+    src/sbb_system_adapter.c
     src/udp_transport.c
 )
 
@@ -24,6 +35,17 @@ target_include_directories(sbb_wrapper_common
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+
+if(SBB_WRAPPER_HAS_SBB_REDL)
+    target_compile_definitions(sbb_wrapper_common PUBLIC SBB_WRAPPER_HAS_SBB_REDL=1)
+    target_include_directories(sbb_wrapper_common
+        PUBLIC
+            ${SBB_ROOT}/source/modules/rasta_common/inc
+            ${SBB_ROOT}/source/modules/rasta_redundancy/inc
+            ${SBB_ROOT}/source/modules/rasta_safety_retransmission/inc
+    )
+    target_link_libraries(sbb_wrapper_common PUBLIC rasta_redundancy rasta_common)
+endif()
 
 add_executable(sbb-rasta-wrapper
     src/main.c
@@ -48,3 +70,11 @@ add_executable(udp_transport_test
 target_link_libraries(udp_transport_test PRIVATE sbb_wrapper_common)
 
 add_test(NAME udp_transport_test COMMAND udp_transport_test)
+
+add_executable(sbb_adapter_bridge_test
+    tests/sbb_adapter_bridge_test.c
+)
+
+target_link_libraries(sbb_adapter_bridge_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME sbb_adapter_bridge_test COMMAND sbb_adapter_bridge_test)
