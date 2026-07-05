@@ -169,17 +169,63 @@ Step 8C should confirm exact payload bytes against `crates/rasta-core/src/applic
 - Rust must eventually support SBB network ID `123456` and IDs `0x61`/`0x62` through a profile or CLI config path.
 - Lower MD4 initial value and safety-code behavior must be verified with live SBB frames.
 
-## Later Step 8C Implementation Plan
+## Step 8C Skeleton Layout
 
-1. Create wrapper directory under `tools/sbb-wrapper` or `interop/sbb-wrapper`.
-2. Add a CMake file that builds alongside the SBB stack.
-3. Implement UDP transport ownership.
-4. Implement required `redtri_*` functions.
-5. Implement required `sradin_*` functions.
-6. Implement active/passive CLI.
-7. Implement Ping/Pong payload codec.
-8. Build the SBB wrapper.
-9. Run an SBB-to-SBB wrapper baseline first.
-10. Run Rust-to-SBB with Rust active and SBB passive.
-11. Capture traces and compare with Rust structured trace output.
-12. Only after live evidence, decide whether to add `RastaProfile::sbb_local()`.
+The wrapper skeleton lives in `interop/sbb-wrapper/`.
+
+Current files:
+
+- `README.md`: skeleton status, build command, CLI examples, and stub list.
+- `CMakeLists.txt`: standalone CMake project that accepts `SBB_ROOT` but does not link SBB yet.
+- `src/main.c`: active/passive CLI parser and deterministic settings logging.
+- `src/sbb_adapter.h` / `src/sbb_adapter.c`: required `sradin_*` and `redtri_*` symbols as logged stubs.
+- `src/udp_transport.h` / `src/udp_transport.c`: UDP configuration holder and logged no-socket initialization stub.
+- `src/ping_pong_payload.h` / `src/ping_pong_payload.c`: Ping/Pong codec compatible with Rust `ApplicationMessage`.
+- `tests/ping_pong_payload_test.c`: C codec smoke test.
+
+The skeleton deliberately does not modify the Rust protocol implementation, add `RastaProfile::sbb_local()`, modify the external SBB checkout, or claim Rust-to-SBB interoperability.
+
+## Step 8C Build Command
+
+Intended local build:
+
+```sh
+cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=/root/sbb-investigation/sbb-rasta-stack
+cmake --build interop/sbb-wrapper/build
+ctest --test-dir interop/sbb-wrapper/build
+```
+
+`SBB_ROOT` is accepted as a CMake cache variable for the future integration path. In Step 8C, it is informational only; no SBB include directories or libraries are consumed.
+
+## Step 8C Current Status
+
+The wrapper is a compile-ready skeleton only.
+
+Implemented:
+
+- CLI parsing for `active` / `passive`, remote IP, `--rounds`, `--run-seconds`, `--trace`, and both channel local/remote ports.
+- Default local port mapping for passive SBB (`7000/7001` local, `7100/7101` remote) and active SBB (`7100/7101` local, `7000/7001` remote).
+- Logged stubs for `sradin_Init`, `sradin_OpenRedundancyChannel`, `sradin_CloseRedundancyChannel`, `sradin_SendMessage`, `sradin_ReadMessage`, `redtri_Init`, `redtri_SendMessage`, and `redtri_ReadMessage`.
+- Read stubs return `radef_kNoMessageReceived` when no queue exists.
+- Send stubs return `radef_kNotImplemented` rather than pretending to send data.
+- Ping/Pong payload encoding and decoding using tag `0x03` / `0x04` plus little-endian `u32`.
+
+Stubbed:
+
+- UDP sockets are not opened yet.
+- SBB SafRetL APIs are not called yet.
+- SBB libraries are not linked yet.
+- Exact SBB adapter function signatures still need confirmation against SBB headers.
+- No connection, heartbeat, retransmission, or safety-code behavior is exercised.
+
+## Step 8D Remaining Work
+
+1. Confirm exact SBB function signatures and return-code names from the SBB headers.
+2. Replace skeleton adapter signatures if needed to match SBB exactly.
+3. Link the wrapper against the external SBB libraries using `SBB_ROOT`.
+4. Implement real UDP socket ownership in the wrapper, still outside Rust `rasta-core`.
+5. Implement bounded receive queues for `sradin_ReadMessage` and `redtri_ReadMessage`.
+6. Call SBB initialization, timing, open, send, receive, state, and close APIs from the wrapper loop.
+7. Run an SBB-to-SBB wrapper baseline before Rust-to-SBB.
+8. Run Rust active to SBB passive with captured traces.
+9. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.
