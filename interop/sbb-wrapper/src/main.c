@@ -191,7 +191,7 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    puts("[sbb-wrapper] Step 8C skeleton only; no SBB interop is claimed");
+    puts("[sbb-wrapper] Step 8E UDP transport smoke only; no SBB interop is claimed");
     print_settings(&settings);
 
     if (sbb_wrapper_udp_init(&settings.udp) != 0) {

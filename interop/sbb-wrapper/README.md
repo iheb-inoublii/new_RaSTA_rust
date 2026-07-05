@@ -51,9 +51,9 @@ Verified Kali result:
 - Active smoke passed:
   `./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace`
 - The wrapper clearly logs skeleton-only status and does not claim interoperability.
-- UDP behavior remains stubbed.
-- Send functions remain stubbed.
-- Read functions return no message.
+- At Step 8D, UDP behavior remained stubbed.
+- At Step 8D, send functions remained stubbed.
+- At Step 8D, read functions returned no message.
 
 This result verifies that the Step 8D skeleton builds and runs smoke checks in
 Kali. It is still not a Rust-to-SBB interoperability result.
@@ -90,6 +90,20 @@ UDP self-test command:
 ./interop/sbb-wrapper/build/udp_transport_test
 ```
 
+Verified Kali result:
+
+- CMake configure passed.
+- CMake build passed.
+- `ping_pong_payload_test` passed.
+- `udp_transport_test` passed.
+- Passive wrapper smoke passed.
+- Active wrapper smoke passed.
+- UDP sockets opened and closed correctly.
+- `redtri_SendMessage` sends through UDP and returns success.
+- `redtri_ReadMessage` returns no message when the socket is empty.
+- `sradin_*` functions remain skeleton stubs.
+- No Rust-to-SBB interoperability is claimed.
+
 ## CLI
 
 ```sh
@@ -106,7 +120,7 @@ Default port mapping:
 | active | channel 0 | `7100` | `7000` |
 | active | channel 1 | `7101` | `7001` |
 
-For now, the executable prints settings, opens two nonblocking UDP sockets, calls
+For now, the executable logs Step 8E UDP transport smoke status, prints settings, opens two nonblocking UDP sockets, calls
 stub initialization functions, runs read/send smoke checks, closes sockets, and
 exits successfully. RedL send/read smoke checks use the real UDP wrapper
 transport. SafRetL remains stubbed and the wrapper does not call SBB SafRetL

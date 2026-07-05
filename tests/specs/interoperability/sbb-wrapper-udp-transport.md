@@ -58,11 +58,24 @@ Run wrapper CLI smoke tests:
 
 ## Current status
 
-Implemented in wrapper source. Kali CMake validation is expected after this change is pushed or copied into the Kali checkout.
+Implemented and validated in Kali.
+
+## Actual result
+
+- CMake configure passed.
+- CMake build passed.
+- `ping_pong_payload_test` passed.
+- `udp_transport_test` passed.
+- Passive wrapper smoke passed.
+- Active wrapper smoke passed.
+- UDP sockets opened and closed correctly.
+- `redtri_SendMessage` sends through UDP and returns success.
+- `redtri_ReadMessage` returns no message when empty.
+- `sradin_*` remains skeleton/stubbed.
+- No Rust-to-SBB interoperability is claimed.
 
 ## Open points
 
-- Verify `udp_transport_test` in Kali.
 - Confirm whether SBB uses transport IDs beyond wrapper channels `0` and `1`.
 - Confirm exact SBB adapter signatures before linking SBB libraries.
 - Add bounded SafRetL queues if SBB adapter calls require asynchronous handoff.

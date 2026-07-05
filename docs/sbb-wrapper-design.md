@@ -222,9 +222,9 @@ Actual Kali result:
 - Passive smoke passed with `./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace`.
 - Active smoke passed with `./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace`.
 - The wrapper logs skeleton-only status and does not claim Rust-to-SBB interoperability.
-- UDP remains stubbed.
-- Send functions remain stubbed.
-- Read functions return no message.
+- At Step 8D, UDP remained stubbed.
+- At Step 8D, send functions remained stubbed.
+- At Step 8D, read functions returned no message.
 
 Skeleton fixes made during Step 8D:
 
@@ -264,6 +264,20 @@ New wrapper test:
 The test opens two loopback channels, sends fixed bytes from channel 0 to channel
 1, verifies exact receive bytes, and verifies no-message behavior on an empty
 socket.
+
+Actual Kali result:
+
+- CMake configure passed.
+- CMake build passed.
+- `ping_pong_payload_test` passed.
+- `udp_transport_test` passed.
+- Passive wrapper smoke passed.
+- Active wrapper smoke passed.
+- UDP sockets opened and closed correctly.
+- `redtri_SendMessage` sends through UDP and returns success.
+- `redtri_ReadMessage` returns no message when empty.
+- `sradin_*` remains skeleton/stubbed.
+- No Rust-to-SBB interoperability is claimed.
 
 ## Current Status
 
