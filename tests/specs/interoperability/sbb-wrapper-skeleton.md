@@ -44,15 +44,16 @@ Provide a compile-ready SBB wrapper skeleton in the Rust repository without clai
 - The wrapper executable builds.
 - The Ping/Pong payload codec test passes.
 - The wrapper CLI accepts active/passive role, remote IP, rounds, run seconds, trace mode, and two channel local/remote ports.
-- The wrapper prints deterministic settings, read/send stub statuses, and exits successfully.
+- The wrapper prints deterministic settings, opens UDP sockets, prints read/send statuses, closes sockets, and exits successfully.
 - Required `sradin_*` and `redtri_*` symbols exist as logged stubs.
-- Read stubs return `radef_kNoMessageReceived` when no queue is implemented.
-- Send stubs do not fake successful interoperability.
+- SafRetL read stubs return `radef_kNoMessageReceived` when no queue is implemented.
+- SafRetL send stubs do not fake successful interoperability.
+- RedL send/read functions delegate to wrapper UDP transport.
 - Rust workspace tests continue to pass.
 
 ## Current status
 
-Skeleton only. The wrapper builds in Kali, but it does not link SBB libraries, does not open UDP sockets, does not establish a RaSTA connection, and does not demonstrate Rust-to-SBB interoperability.
+Skeleton with real UDP transport only. The wrapper builds in Kali, opens UDP sockets, and has UDP-backed RedL adapter functions, but it does not link SBB libraries, does not establish a RaSTA connection, and does not demonstrate Rust-to-SBB interoperability.
 
 Step 8D verified that CMake configure and build pass in Kali with `SBB_ROOT=/root/sbb-investigation/sbb-rasta-stack`. The build creates `ping_pong_payload_test` and `sbb-rasta-wrapper`. Passive and active CLI smoke checks pass, while still logging skeleton-only status.
 
@@ -62,8 +63,7 @@ Step 8D verified that CMake configure and build pass in Kali with `SBB_ROOT=/roo
 - Confirm exact SBB return-code names and values.
 - Confirm SBB timing API name and expected call cadence.
 - Link external SBB libraries through `SBB_ROOT`.
-- Implement real UDP socket behavior outside `rasta-core`.
-- Implement bounded queues for read functions.
+- Implement bounded queues for SafRetL read functions if required.
 - Run SBB-to-SBB wrapper baseline before Rust-to-SBB.
 
 ## Evidence

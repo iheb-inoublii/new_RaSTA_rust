@@ -99,6 +99,7 @@ static int parse_settings(int argc, char **argv, WrapperSettings *settings)
     while (i < argc) {
         if (strcmp(argv[i], "--trace") == 0) {
             settings->trace = 1;
+            settings->udp.trace = 1;
             i += 1;
         } else if (strcmp(argv[i], "--rounds") == 0 && i + 1 < argc) {
             if (parse_uint(argv[i + 1], &settings->rounds) != 0) {

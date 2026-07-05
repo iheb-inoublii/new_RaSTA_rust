@@ -40,3 +40,11 @@ add_executable(ping_pong_payload_test
 target_link_libraries(ping_pong_payload_test PRIVATE sbb_wrapper_common)
 
 add_test(NAME ping_pong_payload_test COMMAND ping_pong_payload_test)
+
+add_executable(udp_transport_test
+    tests/udp_transport_test.c
+)
+
+target_link_libraries(udp_transport_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME udp_transport_test COMMAND udp_transport_test)
