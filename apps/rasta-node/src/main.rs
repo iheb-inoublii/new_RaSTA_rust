@@ -1,9 +1,11 @@
 mod profile;
 
 use profile::{DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE};
-use rasta_core::connection::TimestampTraceEvent;
 use rasta_core::endpoint::{ConnectionStatus, RastaEndpoint, config_from_profile};
 use rasta_core::port::{Transport, TransportError};
+use rasta_core::trace::{
+    PacketTrace, RastaPacketType, RastaTraceEvent, TimestampCompatibilityTrace, TraceDirection,
+};
 use rasta_platform::std_clock::StdClock;
 use rasta_platform::udp::UdpSocketTransport;
 use std::cell::Cell;
@@ -288,41 +290,87 @@ impl<T> TraceTransport<T> {
 
 impl<T: Transport> Transport for TraceTransport<T> {
     fn send(&mut self, data: &[u8]) -> Result<(), TransportError> {
-        if self.trace.enabled {
-            log_wire("TX", self.trace.channel, self.trace.order.get(), data);
-            self.trace
-                .order
-                .set(self.trace.order.get().saturating_add(1));
-        }
+        let _ = self.trace.enabled;
         self.inner.send(data)
     }
 
     fn receive(&mut self, buffer: &mut [u8]) -> Result<usize, TransportError> {
-        let length = self.inner.receive(buffer)?;
-        if self.trace.enabled && length > 0 {
-            log_wire(
-                "RX",
-                self.trace.channel,
-                self.trace.order.get(),
-                &buffer[..length],
-            );
-            self.trace
-                .order
-                .set(self.trace.order.get().saturating_add(1));
-        }
-        Ok(length)
+        let _ = self.trace.enabled;
+        self.inner.receive(buffer)
     }
 }
 
-fn log_wire(direction: &str, channel: &str, order: u64, bytes: &[u8]) {
-    eprintln!(
-        "wire order={order} dir={direction} channel={channel} len={} {}",
-        bytes.len(),
-        decode_wire_summary(bytes)
-    );
-    eprintln!("wire hex={}", hex_bytes(bytes));
+fn log_trace_event(trace: &WireTrace, event: RastaTraceEvent) {
+    match event {
+        RastaTraceEvent::Packet(packet) => log_packet_trace(trace, packet),
+        RastaTraceEvent::TimestampCompatibility(event) => log_timestamp_trace(event),
+        _ => {}
+    }
 }
 
+fn log_packet_trace(trace: &WireTrace, packet: PacketTrace) {
+    if !trace.enabled {
+        return;
+    }
+    let order = trace.order.get();
+    trace.order.set(order.saturating_add(1));
+    let direction = match packet.direction {
+        TraceDirection::Tx => "TX",
+        TraceDirection::Rx => "RX",
+    };
+    let channel = match packet.channel {
+        0 => "channel-0",
+        1 => "channel-1",
+        _ => trace.channel,
+    };
+    eprintln!(
+        "wire order={order} dir={direction} channel={channel} len={} {}",
+        packet.frame_len,
+        trace_packet_summary(packet)
+    );
+}
+
+fn trace_packet_summary(packet: PacketTrace) -> String {
+    let mut summary = format!(
+        "rl_len={} rl_reserve=0 rl_sequence={}",
+        packet.frame_len, packet.redundancy_sequence
+    );
+    if let Some(packet_type) = packet.packet_type {
+        summary.push_str(&format!(
+            " srl_type={}",
+            packet_type_code(packet_type).unwrap_or_default()
+        ));
+    }
+    if let (Some(receiver), Some(sender), Some(sequence), Some(confirmed), Some(ts), Some(cts)) = (
+        packet.receiver_id,
+        packet.sender_id,
+        packet.sequence_number,
+        packet.confirmed_sequence_number,
+        packet.timestamp,
+        packet.confirmed_timestamp,
+    ) {
+        summary.push_str(&format!(
+            " receiver={receiver} sender={sender} sn={sequence} cs={confirmed} ts={ts:#010x} cts={cts:#010x}"
+        ));
+    }
+    summary
+}
+
+fn packet_type_code(packet_type: RastaPacketType) -> Option<u16> {
+    match packet_type {
+        RastaPacketType::ConnectionRequest => Some(6200),
+        RastaPacketType::ConnectionResponse => Some(6201),
+        RastaPacketType::RetransmissionRequest => Some(6212),
+        RastaPacketType::RetransmissionResponse => Some(6213),
+        RastaPacketType::DisconnectionRequest => Some(6216),
+        RastaPacketType::Heartbeat => Some(6220),
+        RastaPacketType::Data => Some(6240),
+        RastaPacketType::RetransmissionData => Some(6241),
+        RastaPacketType::Unknown(value) => Some(value),
+    }
+}
+
+#[cfg(test)]
 fn decode_wire_summary(bytes: &[u8]) -> String {
     if bytes.len() < 8 {
         return "decode=rl-too-short".to_string();
@@ -350,7 +398,7 @@ fn decode_wire_summary(bytes: &[u8]) -> String {
     summary
 }
 
-fn log_timestamp_trace(event: TimestampTraceEvent) {
+fn log_timestamp_trace(event: TimestampCompatibilityTrace) {
     eprintln!(
         "timestamp raw_peer_ts={:#010x} learned_peer_offset={} normalized_ts={:#010x} local_ts={:#010x} local_receive_deadline={} confirmed_ts={:#010x} rejection={:?}",
         event.raw_peer_timestamp,
@@ -369,6 +417,7 @@ fn log_timestamp_trace(event: TimestampTraceEvent) {
     );
 }
 
+#[cfg(test)]
 fn hex_bytes(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len().saturating_mul(3));
@@ -449,9 +498,14 @@ fn main() {
         WireTrace {
             enabled: settings.trace_wire,
             channel: "channel-1",
-            order: trace_order,
+            order: trace_order.clone(),
         },
     );
+    let trace_output = WireTrace {
+        enabled: settings.trace_wire,
+        channel: "structured",
+        order: trace_order,
+    };
 
     // Test-only interoperability profile. Not approved for production or
     // railway operational use.
@@ -510,12 +564,12 @@ fn main() {
             println!("Error during poll: {:?}", e);
             api.drain_diagnostics(|diagnostic| eprintln!("RaSTA diagnostic: {:?}", diagnostic));
             if settings.trace_wire {
-                api.drain_trace_events(log_timestamp_trace);
+                api.drain_trace_events(|event| log_trace_event(&trace_output, event));
             }
             break;
         }
         if settings.trace_wire {
-            api.drain_trace_events(log_timestamp_trace);
+            api.drain_trace_events(|event| log_trace_event(&trace_output, event));
         }
 
         let current_state = api.status();

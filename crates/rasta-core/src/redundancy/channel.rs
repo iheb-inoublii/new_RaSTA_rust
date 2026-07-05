@@ -1,5 +1,7 @@
 use crate::port::{RastaTransport, TransportError};
+use crate::queue::{FixedQueue, FixedQueueError};
 use crate::time::{DurationMs, MonotonicInstant};
+use crate::trace::{PacketTrace, RastaPacketType, RastaTraceEvent, TraceDirection};
 
 use super::defer_queue::DeferQueue;
 use super::frame::{HEADER_SIZE, MAX_FRAME_SIZE, parse_header, payload_range, write_header};
@@ -86,6 +88,8 @@ pub struct RedundancyLayer<T1: RastaTransport, T2: RastaTransport> {
     sequence: RedundancySequence,
     deferred: DeferQueue,
     channels: [ChannelState; 2],
+    trace_events: FixedQueue<RastaTraceEvent, 32>,
+    trace_overflow_count: u32,
 }
 
 impl<T1: RastaTransport, T2: RastaTransport> RedundancyLayer<T1, T2> {
@@ -103,6 +107,8 @@ impl<T1: RastaTransport, T2: RastaTransport> RedundancyLayer<T1, T2> {
             sequence: RedundancySequence::new(),
             deferred: DeferQueue::new(),
             channels: [ChannelState::new(), ChannelState::new()],
+            trace_events: FixedQueue::new(),
+            trace_overflow_count: 0,
         }
     }
 
@@ -116,6 +122,14 @@ impl<T1: RastaTransport, T2: RastaTransport> RedundancyLayer<T1, T2> {
 
     pub fn channel_counters(&self, channel: ChannelId) -> ChannelCounters {
         self.channels[channel.index()].counters
+    }
+
+    pub fn take_trace_event(&mut self) -> Option<RastaTraceEvent> {
+        self.trace_events.pop()
+    }
+
+    pub fn trace_overflow_count(&self) -> u32 {
+        self.trace_overflow_count
     }
 
     pub fn send(&mut self, data: &[u8]) -> Result<(), TransportError> {
@@ -145,6 +159,8 @@ impl<T1: RastaTransport, T2: RastaTransport> RedundancyLayer<T1, T2> {
             .ok_or(TransportError::BufferTooSmall)?;
         let result_a = self.transport_a.send(frame);
         let result_b = self.transport_b.send(frame);
+        self.record_packet_trace(TraceDirection::Tx, ChannelId::Channel0, frame);
+        self.record_packet_trace(TraceDirection::Tx, ChannelId::Channel1, frame);
         self.record_send_result(ChannelId::Channel0, result_a.is_ok(), now);
         self.record_send_result(ChannelId::Channel1, result_b.is_ok(), now);
         if result_a.is_err() && result_b.is_err() {
@@ -180,6 +196,9 @@ impl<T1: RastaTransport, T2: RastaTransport> RedundancyLayer<T1, T2> {
             match result {
                 Ok(0) => {}
                 Ok(bytes_read) => {
+                    if let Some(frame) = temporary.get(..bytes_read) {
+                        self.record_packet_trace(TraceDirection::Rx, channel, frame);
+                    }
                     match self.accept_frame(channel, &temporary, bytes_read, buffer, now) {
                         Ok(Some(length)) => return Ok(length),
                         Ok(None) => {}
@@ -413,6 +432,48 @@ impl<T1: RastaTransport, T2: RastaTransport> RedundancyLayer<T1, T2> {
                 state.counters.status_transition_count.saturating_add(1);
         }
     }
+
+    fn record_packet_trace(&mut self, direction: TraceDirection, channel: ChannelId, frame: &[u8]) {
+        let event = RastaTraceEvent::Packet(packet_trace(direction, channel, frame));
+        if self.trace_events.push(event) == Err(FixedQueueError::Full) {
+            self.trace_overflow_count = self.trace_overflow_count.saturating_add(1);
+        }
+    }
+}
+
+fn packet_trace(direction: TraceDirection, channel: ChannelId, frame: &[u8]) -> PacketTrace {
+    let frame_len = frame.len();
+    let redundancy_sequence = read_u32(frame, 4).unwrap_or_default();
+    let packet_type = read_u16(frame, 10).map(RastaPacketType::from);
+    PacketTrace {
+        direction,
+        channel: channel.index() as u8,
+        frame_len,
+        redundancy_sequence,
+        packet_type,
+        receiver_id: read_u32(frame, 12),
+        sender_id: read_u32(frame, 16),
+        sequence_number: read_u32(frame, 20),
+        confirmed_sequence_number: read_u32(frame, 24),
+        timestamp: read_u32(frame, 28),
+        confirmed_timestamp: read_u32(frame, 32),
+    }
+}
+
+fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_le_bytes([
+        *bytes.get(offset)?,
+        *bytes.get(offset + 1)?,
+    ]))
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes([
+        *bytes.get(offset)?,
+        *bytes.get(offset + 1)?,
+        *bytes.get(offset + 2)?,
+        *bytes.get(offset + 3)?,
+    ]))
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ pub mod serial;
 pub mod service;
 pub mod srl;
 pub mod time;
+pub mod trace;
 
 #[cfg(test)]
 mod tests;

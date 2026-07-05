@@ -1,5 +1,7 @@
 //! Platform-independent RaSTA configuration types and profile validation.
 
+use core::fmt;
+
 use crate::connection::safety_code::SafetyCodeConfig;
 use crate::redundancy::{RedundancyConfig, RedundancyCrc};
 
@@ -46,6 +48,24 @@ pub enum ConfigError {
 
 pub type ProfileError = ConfigError;
 pub type InteroperabilityProfile = RastaProfile;
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedProtocolVersion => f.write_str("unsupported protocol version"),
+            Self::InvalidChannelCount => f.write_str("invalid channel count"),
+            Self::InvalidFlowControl => f.write_str("invalid flow control"),
+            Self::InvalidCapacity => f.write_str("invalid capacity"),
+            Self::InvalidTiming => f.write_str("invalid timing"),
+            Self::InvalidPacketization => f.write_str("invalid packetization"),
+            Self::InvalidNetworkIdentifier => f.write_str("invalid network identifier"),
+            Self::UnsafeMd4InitialValue => f.write_str("unsafe md4 initial value"),
+            Self::UnsafeNoChecksumRequiresOptIn => {
+                f.write_str("unsafe no-checksum profile requires explicit opt-in")
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RastaProfile {

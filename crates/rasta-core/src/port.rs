@@ -4,6 +4,8 @@
 //! embedded Ethernet drivers, and test doubles live outside the protocol core
 //! and implement these traits without requiring heap allocation or `std`.
 
+use core::fmt;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransportError {
     SendFailed,
@@ -11,6 +13,18 @@ pub enum TransportError {
     BufferTooSmall,
     InvalidFrame,
     SequenceViolation,
+}
+
+impl fmt::Display for TransportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SendFailed => f.write_str("send failed"),
+            Self::ReceiveFailed => f.write_str("receive failed"),
+            Self::BufferTooSmall => f.write_str("buffer too small"),
+            Self::InvalidFrame => f.write_str("invalid frame"),
+            Self::SequenceViolation => f.write_str("sequence violation"),
+        }
+    }
 }
 
 /// Public RaSTA frame transport contract.

@@ -4,14 +4,17 @@
 //! state-machine details, and queue plumbing behind a small application-facing
 //! interface.
 
+use core::fmt;
+
 use crate::config::{ConfigError, RastaConfig, RastaProfile, SafetyCodeLength};
+use crate::connection::ConnectionError;
 use crate::connection::safety_code::{SafetyCodeConfig, SafetyCodeMode};
-use crate::connection::{ConnectionError, TimestampTraceEvent};
 use crate::port::{RandomError, RandomSource, RastaTransport};
 use crate::redundancy::{RedundancyCheckCode, RedundancyConfig, RedundancyCrc};
 use crate::service::RastaService;
 use crate::srl::DiagnosticEvent;
 use crate::time::{MonotonicClock, ProtocolTimestampSource};
+use crate::trace::RastaTraceEvent;
 
 pub use crate::service::ConnectionStatus;
 
@@ -61,6 +64,31 @@ impl From<ConnectionError> for RastaError {
 impl From<ConfigError> for RastaError {
     fn from(error: ConfigError) -> Self {
         Self::Config(error)
+    }
+}
+
+impl fmt::Display for RastaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Transport => f.write_str("transport error"),
+            Self::Packet => f.write_str("packet error"),
+            Self::UnexpectedPacket => f.write_str("unexpected packet"),
+            Self::BufferFull => f.write_str("buffer full"),
+            Self::ProtocolViolation => f.write_str("protocol violation"),
+            Self::SafetyTimeout => f.write_str("safety timeout"),
+            Self::InvalidState => f.write_str("invalid state"),
+            Self::InvalidPayloadSize => f.write_str("invalid payload size"),
+            Self::ReceiveQueueEmpty => f.write_str("receive queue empty"),
+            Self::ReceiveQueueFull => f.write_str("receive queue full"),
+            Self::TransmitQueueFull => f.write_str("transmit queue full"),
+            Self::InvalidConfiguration => f.write_str("invalid configuration"),
+            Self::RetransmissionUnavailable => f.write_str("retransmission unavailable"),
+            Self::Random(_) => f.write_str("random source error"),
+            Self::Config(error) => write!(f, "configuration error: {error}"),
+            Self::MissingLocalId => f.write_str("missing local id"),
+            Self::MissingRemoteId => f.write_str("missing remote id"),
+            Self::MissingConfig => f.write_str("missing configuration"),
+        }
     }
 }
 
@@ -146,14 +174,18 @@ impl<T1: RastaTransport, T2: RastaTransport, C: MonotonicClock + ProtocolTimesta
         }
     }
 
-    pub fn take_trace_event(&mut self) -> Option<TimestampTraceEvent> {
-        self.service.take_timestamp_trace()
+    pub fn take_trace_event(&mut self) -> Option<RastaTraceEvent> {
+        self.service.take_trace_event()
     }
 
-    pub fn drain_trace_events<F: FnMut(TimestampTraceEvent)>(&mut self, mut on_event: F) {
+    pub fn drain_trace_events<F: FnMut(RastaTraceEvent)>(&mut self, mut on_event: F) {
         while let Some(event) = self.take_trace_event() {
             on_event(event);
         }
+    }
+
+    pub fn trace_overflow_count(&self) -> u32 {
+        self.service.trace_overflow_count()
     }
 }
 
@@ -309,8 +341,11 @@ mod tests {
     use crate::time::{
         MonotonicClock, MonotonicInstant, ProtocolTimestamp, ProtocolTimestampSource,
     };
+    use crate::trace::{RastaTraceEvent, TraceDirection};
     use std::cell::{Cell, RefCell};
+    use std::format;
     use std::rc::Rc;
+    use std::vec::Vec;
 
     #[derive(Clone)]
     struct FakeClock(Rc<Cell<u32>>);
@@ -481,6 +516,12 @@ mod tests {
         }
     }
 
+    fn drain(endpoint: &mut Endpoint) -> Vec<RastaTraceEvent> {
+        let mut events = Vec::new();
+        endpoint.drain_trace_events(|event| events.push(event));
+        events
+    }
+
     #[test]
     fn endpoint_builder_accepts_valid_config_and_transports() {
         let network = Rc::new(RefCell::new(Network::new()));
@@ -616,6 +657,80 @@ mod tests {
     }
 
     #[test]
+    fn trace_events_cover_packets_states_heartbeats_and_application_data() {
+        let (mut a, mut b, _clock) = endpoint_pair();
+        a.connect().unwrap();
+        b.connect().unwrap();
+        poll_pair(&mut a, &mut b, 8);
+        a.send(b"hello").unwrap();
+        poll_pair(&mut a, &mut b, 8);
+        let mut output = [0u8; 16];
+        let _ = b.receive(&mut output).unwrap();
+
+        let mut events = drain(&mut a);
+        events.extend(drain(&mut b));
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RastaTraceEvent::Packet(packet) if packet.direction == TraceDirection::Tx
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RastaTraceEvent::Packet(packet) if packet.direction == TraceDirection::Rx
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RastaTraceEvent::StateTransition(_)))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RastaTraceEvent::HeartbeatSent))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RastaTraceEvent::HeartbeatReceived))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RastaTraceEvent::ApplicationDataSent { len: 5 }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RastaTraceEvent::ApplicationDataReceived { len: 5 }))
+        );
+    }
+
+    #[test]
+    fn trace_draining_empties_queue() {
+        let (mut a, mut b, _clock) = endpoint_pair();
+        a.connect().unwrap();
+        b.connect().unwrap();
+        poll_pair(&mut a, &mut b, 4);
+
+        assert!(!drain(&mut a).is_empty());
+        assert!(drain(&mut a).is_empty());
+    }
+
+    #[test]
+    fn trace_overflow_is_counted_deterministically() {
+        let (mut a, mut b, _clock) = endpoint_pair();
+        a.connect().unwrap();
+        b.connect().unwrap();
+        poll_pair(&mut a, &mut b, 8);
+
+        for _ in 0..64 {
+            let _ = a.send(b"x");
+        }
+
+        assert!(a.trace_overflow_count() > 0);
+    }
+
+    #[test]
     fn send_is_rejected_until_connection_is_up() {
         let (mut a, _b, _clock) = endpoint_pair();
 
@@ -669,6 +784,27 @@ mod tests {
         assert!(a.take_trace_event().is_some());
         let mut count = 0;
         a.drain_trace_events(|_| count += 1);
-        assert!(count <= 16);
+        assert!(count <= 96);
+    }
+
+    #[test]
+    fn public_errors_convert_and_display_stably() {
+        let config_error = RastaError::from(crate::config::ConfigError::InvalidTiming);
+        assert_eq!(
+            format!("{config_error}"),
+            "configuration error: invalid timing"
+        );
+
+        let transport_error = RastaError::from(crate::connection::ConnectionError::Transport(
+            TransportError::SendFailed,
+        ));
+        assert_eq!(transport_error, RastaError::Transport);
+        assert_eq!(format!("{transport_error}"), "transport error");
+
+        let protocol_error =
+            RastaError::from(crate::connection::ConnectionError::ProtocolViolation);
+        assert_eq!(protocol_error, RastaError::ProtocolViolation);
+        assert_eq!(format!("{protocol_error}"), "protocol violation");
+        assert_eq!(format!("{}", TransportError::InvalidFrame), "invalid frame");
     }
 }
