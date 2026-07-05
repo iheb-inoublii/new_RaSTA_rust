@@ -333,6 +333,7 @@ fn redundancy_check_code_from_profile(crc: RedundancyCrc) -> RedundancyCheckCode
 #[cfg(test)]
 mod tests {
     use super::{RastaEndpoint, RastaError, config_from_profile};
+    use crate::application::{ApplicationMessage, SignalAspect, movement_authority_for_signal};
     use crate::config::{RastaConfig, RastaProfile, TimestampCompatibilityMode};
     use crate::connection::safety_code::SafetyCodeConfig;
     use crate::port::{Transport, TransportError};
@@ -702,6 +703,67 @@ mod tests {
             events
                 .iter()
                 .any(|event| matches!(event, RastaTraceEvent::ApplicationDataReceived { len: 5 }))
+        );
+    }
+
+    #[test]
+    fn rust_to_rust_bidirectional_application_message_flow_uses_public_api() {
+        let (mut signal, mut interlocking, _clock) = endpoint_pair();
+        signal.connect().unwrap();
+        interlocking.connect().unwrap();
+        poll_pair(&mut signal, &mut interlocking, 8);
+
+        let mut encoded = [0u8; ApplicationMessage::MAX_ENCODED_LEN];
+        let len = ApplicationMessage::SignalStatus {
+            signal_id: 1,
+            aspect: SignalAspect::Red,
+        }
+        .encode(&mut encoded)
+        .unwrap();
+        signal.send(&encoded[..len]).unwrap();
+        poll_pair(&mut signal, &mut interlocking, 8);
+
+        let mut received = [0u8; ApplicationMessage::MAX_ENCODED_LEN];
+        let len = interlocking.receive(&mut received).unwrap();
+        let message = ApplicationMessage::decode(&received[..len]).unwrap();
+        let ApplicationMessage::SignalStatus { signal_id, aspect } = message else {
+            panic!("expected signal status");
+        };
+        let response = movement_authority_for_signal(signal_id, aspect);
+        let len = response.encode(&mut encoded).unwrap();
+        interlocking.send(&encoded[..len]).unwrap();
+        poll_pair(&mut signal, &mut interlocking, 8);
+
+        let len = signal.receive(&mut received).unwrap();
+        assert_eq!(
+            ApplicationMessage::decode(&received[..len]),
+            Ok(ApplicationMessage::MovementAuthority {
+                signal_id: 1,
+                allow_green: false,
+                reason_code: 1,
+            })
+        );
+
+        let len = ApplicationMessage::Ping { counter: 1 }
+            .encode(&mut encoded)
+            .unwrap();
+        signal.send(&encoded[..len]).unwrap();
+        poll_pair(&mut signal, &mut interlocking, 8);
+        let len = interlocking.receive(&mut received).unwrap();
+        assert_eq!(
+            ApplicationMessage::decode(&received[..len]),
+            Ok(ApplicationMessage::Ping { counter: 1 })
+        );
+
+        let len = ApplicationMessage::Pong { counter: 1 }
+            .encode(&mut encoded)
+            .unwrap();
+        interlocking.send(&encoded[..len]).unwrap();
+        poll_pair(&mut signal, &mut interlocking, 8);
+        let len = signal.receive(&mut received).unwrap();
+        assert_eq!(
+            ApplicationMessage::decode(&received[..len]),
+            Ok(ApplicationMessage::Pong { counter: 1 })
         );
     }
 

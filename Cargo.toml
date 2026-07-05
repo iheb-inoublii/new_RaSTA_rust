@@ -4,4 +4,6 @@ members = [
     "crates/rasta-core",
     "crates/rasta-platform",
     "apps/rasta-node",
+    "apps/signal-controller",
+    "apps/interlocking-controller",
 ]

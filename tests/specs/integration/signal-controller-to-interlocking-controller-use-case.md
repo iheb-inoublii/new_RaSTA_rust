@@ -1,22 +1,26 @@
 # Signal-controller to interlocking-controller use case
 
 ## Objective
-Document the future application-level signal/interlocking scenario.
+Verify the sample signal-controller to interlocking-controller bidirectional application flow.
 ## Related requirement
-Future signal and interlocking app foundation.
+Supervisor Step 6 signal/interlocking object-controller example.
 ## Preconditions
-Signal/interlocking applications are not implemented in this phase.
+Workspace builds successfully and UDP loopback is available.
 ## Test setup
-Future Rust endpoints representing a signal controller and interlocking controller.
+Run `interlocking-controller` and `signal-controller` on the same host.
 ## Test data
-TBD command and status payloads.
+`SignalStatus(signal_id=1, Red)`, `MovementAuthority(false)`, `SignalStatus(signal_id=1, GreenRequested)`, `MovementAuthority(true)`, and Ping/Pong counters.
 ## Test steps
-Establish connection, send signal command, receive interlocking response, close.
+1. Start `cargo run -p interlocking-controller -- 127.0.0.1 --run-seconds 20`.
+2. Start `cargo run -p signal-controller -- 127.0.0.1 --run-seconds 20`.
+3. Observe the connection reaching `Up`.
+4. Observe Red status, denied authority, GreenRequested status, allowed authority, and Ping/Pong rounds.
+5. Let the run duration expire.
 ## Expected result
-Payload exchange follows the agreed application contract.
+Messages are exchanged in order and both endpoints disconnect gracefully.
 ## Postconditions
-Application state is consistent on both sides.
+No process remains running and no protocol panic occurs.
 ## Evidence
-Future scenario logs.
+Console logs from both applications.
 ## Automation status
-Planned; documentation foundation only.
+Application message model and in-memory public API flow are automated; two-process UDP scenario is manual.
