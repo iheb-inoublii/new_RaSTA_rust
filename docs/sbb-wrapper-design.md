@@ -176,7 +176,7 @@ The wrapper skeleton lives in `interop/sbb-wrapper/`.
 Current files:
 
 - `README.md`: skeleton status, build command, CLI examples, and stub list.
-- `CMakeLists.txt`: standalone CMake project that accepts `SBB_ROOT` but does not link SBB yet.
+- `CMakeLists.txt`: standalone CMake project that accepts `SBB_ROOT` but does not link SBB yet and builds `sbb-rasta-wrapper`.
 - `src/main.c`: active/passive CLI parser and deterministic settings logging.
 - `src/sbb_adapter.h` / `src/sbb_adapter.c`: required `sradin_*` and `redtri_*` symbols as logged stubs.
 - `src/udp_transport.h` / `src/udp_transport.c`: UDP configuration holder and logged no-socket initialization stub.
@@ -197,6 +197,34 @@ ctest --test-dir interop/sbb-wrapper/build
 
 `SBB_ROOT` is accepted as a CMake cache variable for the future integration path. In Step 8C, it is informational only; no SBB include directories or libraries are consumed.
 
+## Step 8D Verification Attempt
+
+Requested Kali commands:
+
+```sh
+cmake -S interop/sbb-wrapper \
+      -B interop/sbb-wrapper/build \
+      -G Ninja \
+      -DSBB_ROOT=/root/sbb-investigation/sbb-rasta-stack
+cmake --build interop/sbb-wrapper/build
+ctest --test-dir interop/sbb-wrapper/build
+./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace
+./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace
+```
+
+Actual result in the available Codex session:
+
+- Kali was not registered as an accessible WSL distribution; `wsl -l -v` listed only `docker-desktop`.
+- The SBB checkout path `/root/sbb-investigation/sbb-rasta-stack` was not reachable.
+- `cmake`, `ninja`, `gcc`, `clang`, and `cl` were not available on PATH.
+- The wrapper CMake build could not be executed in this host environment.
+- Rust validation with `cargo fmt --all -- --check` and `cargo test --workspace --all-targets --all-features` passed.
+
+Skeleton fixes made during Step 8D:
+
+- Renamed the CMake executable target to `sbb-rasta-wrapper` to match the smoke-test command.
+- Added explicit CLI smoke calls for send/read stubs so `radef_kNotImplemented` and `radef_kNoMessageReceived` behavior is visible in wrapper output.
+
 ## Step 8C Current Status
 
 The wrapper is a compile-ready skeleton only.
@@ -208,6 +236,7 @@ Implemented:
 - Logged stubs for `sradin_Init`, `sradin_OpenRedundancyChannel`, `sradin_CloseRedundancyChannel`, `sradin_SendMessage`, `sradin_ReadMessage`, `redtri_Init`, `redtri_SendMessage`, and `redtri_ReadMessage`.
 - Read stubs return `radef_kNoMessageReceived` when no queue exists.
 - Send stubs return `radef_kNotImplemented` rather than pretending to send data.
+- CLI smoke runs print both send and read stub statuses before exiting successfully.
 - Ping/Pong payload encoding and decoding using tag `0x03` / `0x04` plus little-endian `u32`.
 
 Stubbed:
@@ -218,7 +247,7 @@ Stubbed:
 - Exact SBB adapter function signatures still need confirmation against SBB headers.
 - No connection, heartbeat, retransmission, or safety-code behavior is exercised.
 
-## Step 8D Remaining Work
+## Step 8E Remaining Work
 
 1. Confirm exact SBB function signatures and return-code names from the SBB headers.
 2. Replace skeleton adapter signatures if needed to match SBB exactly.

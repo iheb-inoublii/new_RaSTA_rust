@@ -147,6 +147,35 @@ static void print_settings(const WrapperSettings *settings)
     sbb_wrapper_udp_print_config(&settings->udp);
 }
 
+static void run_stub_smoke_checks(void)
+{
+    uint8_t payload[SBB_WRAPPER_PING_PONG_PAYLOAD_LEN] = {0};
+    uint8_t receive_buffer[128] = {0};
+    size_t payload_length = 0;
+    size_t received_length = 0;
+    RadefReturnCode result;
+
+    if (sbb_wrapper_encode_ping(1u, payload, sizeof(payload), &payload_length) == SBB_WRAPPER_PAYLOAD_OK) {
+        result = sradin_SendMessage(0u, payload, payload_length);
+        printf("[sbb-wrapper] sradin_SendMessage smoke result=%d\n", result);
+
+        result = redtri_SendMessage(0u, payload, payload_length);
+        printf("[sbb-wrapper] redtri_SendMessage smoke result=%d\n", result);
+    }
+
+    result = sradin_ReadMessage(0u, receive_buffer, sizeof(receive_buffer), &received_length);
+    printf(
+        "[sbb-wrapper] sradin_ReadMessage smoke result=%d length=%zu\n",
+        result,
+        received_length);
+
+    result = redtri_ReadMessage(0u, receive_buffer, sizeof(receive_buffer), &received_length);
+    printf(
+        "[sbb-wrapper] redtri_ReadMessage smoke result=%d length=%zu\n",
+        result,
+        received_length);
+}
+
 int main(int argc, char **argv)
 {
     WrapperSettings settings;
@@ -171,6 +200,8 @@ int main(int argc, char **argv)
     if (sradin_Init() != radef_kOk || redtri_Init() != radef_kOk) {
         return 1;
     }
+
+    run_stub_smoke_checks();
 
     puts("[sbb-wrapper] exiting after skeleton initialization");
     sbb_wrapper_udp_close();

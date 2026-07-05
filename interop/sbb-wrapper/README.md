@@ -24,11 +24,36 @@ ctest --test-dir interop/sbb-wrapper/build
 `SBB_ROOT` is recorded for the intended integration path, but this Step 8C
 skeleton does not link SBB libraries yet.
 
+## Step 8D Kali Verification
+
+Intended Kali verification from the Rust repository root:
+
+```sh
+cmake -S interop/sbb-wrapper \
+      -B interop/sbb-wrapper/build \
+      -G Ninja \
+      -DSBB_ROOT=/root/sbb-investigation/sbb-rasta-stack
+cmake --build interop/sbb-wrapper/build
+ctest --test-dir interop/sbb-wrapper/build
+./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace
+./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace
+```
+
+Current recorded result from the available Codex session:
+
+- Kali WSL distribution was not available; `wsl -l -v` listed only `docker-desktop`.
+- `/root/sbb-investigation/sbb-rasta-stack` was not reachable from this host.
+- `cmake`, `ninja`, `gcc`, `clang`, and `cl` were not available on PATH.
+- Rust workspace validation still passed.
+
+Therefore the Kali wrapper build remains pending until the repo is opened inside
+the Kali environment that contains `/root/sbb-investigation/sbb-rasta-stack`.
+
 ## CLI
 
 ```sh
-interop/sbb-wrapper/build/sbb-wrapper passive 127.0.0.1 --rounds 10 --run-seconds 40 --trace
-interop/sbb-wrapper/build/sbb-wrapper active 127.0.0.1 --channel0-local 7100 --channel0-remote 7000
+interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 10 --run-seconds 40 --trace
+interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --channel0-local 7100 --channel0-remote 7000
 ```
 
 Default port mapping:
@@ -40,8 +65,11 @@ Default port mapping:
 | active | channel 0 | `7100` | `7000` |
 | active | channel 1 | `7101` | `7001` |
 
-For now, the executable prints settings, calls stub initialization functions, and
-exits successfully. It does not open UDP sockets or call SBB SafRetL APIs.
+For now, the executable prints settings, calls stub initialization functions,
+runs stub read/send smoke checks, and exits successfully. Send smoke checks
+return `radef_kNotImplemented`; read smoke checks return
+`radef_kNoMessageReceived`. It does not open UDP sockets or call SBB SafRetL
+APIs.
 
 ## Ping/Pong Payload
 
@@ -72,3 +100,11 @@ RedL transport stubs:
 
 The function signatures are local skeleton signatures until Step 8D confirms the
 exact SBB headers and links against the real SBB modules.
+
+## Remaining Step 8E Work
+
+- Run the recorded Kali CMake/Ninja commands in the Kali environment.
+- Confirm the wrapper skeleton compiles with the available C compiler.
+- Replace local skeleton function signatures only if SBB headers require it.
+- Keep the wrapper outside Rust protocol code.
+- Link external SBB libraries only after the exact include/library layout is confirmed.

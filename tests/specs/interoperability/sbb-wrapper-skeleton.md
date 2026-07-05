@@ -44,7 +44,7 @@ Provide a compile-ready SBB wrapper skeleton in the Rust repository without clai
 - The wrapper executable builds.
 - The Ping/Pong payload codec test passes.
 - The wrapper CLI accepts active/passive role, remote IP, rounds, run seconds, trace mode, and two channel local/remote ports.
-- The wrapper prints deterministic settings and exits successfully.
+- The wrapper prints deterministic settings, read/send stub statuses, and exits successfully.
 - Required `sradin_*` and `redtri_*` symbols exist as logged stubs.
 - Read stubs return `radef_kNoMessageReceived` when no queue is implemented.
 - Send stubs do not fake successful interoperability.
@@ -53,6 +53,8 @@ Provide a compile-ready SBB wrapper skeleton in the Rust repository without clai
 ## Current status
 
 Skeleton only. The wrapper does not link SBB libraries, does not open UDP sockets, does not establish a RaSTA connection, and does not demonstrate Rust-to-SBB interoperability.
+
+Step 8D recorded that the available Codex host could not run the Kali wrapper build because Kali, the SBB checkout path, CMake, Ninja, and C compilers were not available from this session. The intended Kali commands are preserved here and in `interop/sbb-wrapper/README.md`.
 
 ## Open points
 

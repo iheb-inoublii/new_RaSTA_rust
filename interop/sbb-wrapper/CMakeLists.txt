@@ -25,11 +25,11 @@ target_include_directories(sbb_wrapper_common
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-add_executable(sbb-wrapper
+add_executable(sbb-rasta-wrapper
     src/main.c
 )
 
-target_link_libraries(sbb-wrapper PRIVATE sbb_wrapper_common)
+target_link_libraries(sbb-rasta-wrapper PRIVATE sbb_wrapper_common)
 
 enable_testing()
 
