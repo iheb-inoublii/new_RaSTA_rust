@@ -52,9 +52,9 @@ Provide a compile-ready SBB wrapper skeleton in the Rust repository without clai
 
 ## Current status
 
-Skeleton only. The wrapper does not link SBB libraries, does not open UDP sockets, does not establish a RaSTA connection, and does not demonstrate Rust-to-SBB interoperability.
+Skeleton only. The wrapper builds in Kali, but it does not link SBB libraries, does not open UDP sockets, does not establish a RaSTA connection, and does not demonstrate Rust-to-SBB interoperability.
 
-Step 8D recorded that the available Codex host could not run the Kali wrapper build because Kali, the SBB checkout path, CMake, Ninja, and C compilers were not available from this session. The intended Kali commands are preserved here and in `interop/sbb-wrapper/README.md`.
+Step 8D verified that CMake configure and build pass in Kali with `SBB_ROOT=/root/sbb-investigation/sbb-rasta-stack`. The build creates `ping_pong_payload_test` and `sbb-rasta-wrapper`. Passive and active CLI smoke checks pass, while still logging skeleton-only status.
 
 ## Open points
 

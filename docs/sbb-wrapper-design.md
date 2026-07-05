@@ -197,7 +197,7 @@ ctest --test-dir interop/sbb-wrapper/build
 
 `SBB_ROOT` is accepted as a CMake cache variable for the future integration path. In Step 8C, it is informational only; no SBB include directories or libraries are consumed.
 
-## Step 8D Verification Attempt
+## Step 8D Verification Result
 
 Requested Kali commands:
 
@@ -212,13 +212,18 @@ ctest --test-dir interop/sbb-wrapper/build
 ./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace
 ```
 
-Actual result in the available Codex session:
+Actual Kali result:
 
-- Kali was not registered as an accessible WSL distribution; `wsl -l -v` listed only `docker-desktop`.
-- The SBB checkout path `/root/sbb-investigation/sbb-rasta-stack` was not reachable.
-- `cmake`, `ninja`, `gcc`, `clang`, and `cl` were not available on PATH.
-- The wrapper CMake build could not be executed in this host environment.
-- Rust validation with `cargo fmt --all -- --check` and `cargo test --workspace --all-targets --all-features` passed.
+- CMake configure passed with `SBB_ROOT=/root/sbb-investigation/sbb-rasta-stack`.
+- CMake build passed.
+- The build created `interop/sbb-wrapper/build/ping_pong_payload_test`.
+- The build created `interop/sbb-wrapper/build/sbb-rasta-wrapper`.
+- Passive smoke passed with `./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace`.
+- Active smoke passed with `./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace`.
+- The wrapper logs skeleton-only status and does not claim Rust-to-SBB interoperability.
+- UDP remains stubbed.
+- Send functions remain stubbed.
+- Read functions return no message.
 
 Skeleton fixes made during Step 8D:
 

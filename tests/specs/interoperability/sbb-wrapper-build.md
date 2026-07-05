@@ -41,22 +41,28 @@ ctest --test-dir interop/sbb-wrapper/build
 
 ## Actual result
 
-Not completed in the available Codex host environment.
+Passed in Kali.
 
-Observed host limitations:
+- CMake configure passed with `SBB_ROOT=/root/sbb-investigation/sbb-rasta-stack`.
+- CMake build passed.
+- The build created `interop/sbb-wrapper/build/ping_pong_payload_test`.
+- The build created `interop/sbb-wrapper/build/sbb-rasta-wrapper`.
+- Passive smoke test passed:
 
-- `wsl -l -v` listed only `docker-desktop`; Kali was not available.
-- `/root/sbb-investigation/sbb-rasta-stack` was not reachable.
-- `cmake` was not available on PATH.
-- `ninja` was not available on PATH.
-- `gcc`, `clang`, and `cl` were not available on PATH.
+  ```sh
+  ./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace
+  ```
 
-Rust validation did run and passed:
+- Active smoke test passed:
 
-```sh
-cargo fmt --all -- --check
-cargo test --workspace --all-targets --all-features
-```
+  ```sh
+  ./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace
+  ```
+
+- The wrapper clearly logs skeleton-only status and does not claim Rust-to-SBB interoperability.
+- UDP is still stubbed.
+- Send functions are stubbed.
+- Read functions return no message.
 
 ## Postconditions
 
@@ -78,11 +84,10 @@ cargo test --workspace --all-targets --all-features
 
 ## Automation status
 
-Partially automated. Rust workspace validation is automated and passing. Kali CMake/Ninja wrapper validation is pending until the repository is opened in the Kali environment with the SBB checkout.
+Partially automated. The Kali CMake/Ninja build and CLI smoke checks have been run manually and passed. Rust workspace validation remains automated through Cargo.
 
 ## Open points
 
-- Run the recorded commands in Kali.
-- Capture the exact CMake configure/build output.
-- Capture passive and active CLI smoke output.
-- Fix wrapper-only CMake/source issues if the Kali build exposes any.
+- Capture full command output as an artifact in a future evidence file if required.
+- Confirm exact SBB adapter/transport function signatures before linking real SBB libraries.
+- Implement real UDP behavior only after the wrapper is connected to SBB APIs.

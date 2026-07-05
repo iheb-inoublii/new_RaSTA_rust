@@ -39,15 +39,23 @@ ctest --test-dir interop/sbb-wrapper/build
 ./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace
 ```
 
-Current recorded result from the available Codex session:
+Verified Kali result:
 
-- Kali WSL distribution was not available; `wsl -l -v` listed only `docker-desktop`.
-- `/root/sbb-investigation/sbb-rasta-stack` was not reachable from this host.
-- `cmake`, `ninja`, `gcc`, `clang`, and `cl` were not available on PATH.
-- Rust workspace validation still passed.
+- CMake configure passed with `SBB_ROOT=/root/sbb-investigation/sbb-rasta-stack`.
+- CMake build passed.
+- The build created `interop/sbb-wrapper/build/ping_pong_payload_test`.
+- The build created `interop/sbb-wrapper/build/sbb-rasta-wrapper`.
+- Passive smoke passed:
+  `./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace`
+- Active smoke passed:
+  `./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace`
+- The wrapper clearly logs skeleton-only status and does not claim interoperability.
+- UDP behavior remains stubbed.
+- Send functions remain stubbed.
+- Read functions return no message.
 
-Therefore the Kali wrapper build remains pending until the repo is opened inside
-the Kali environment that contains `/root/sbb-investigation/sbb-rasta-stack`.
+This result verifies that the Step 8D skeleton builds and runs smoke checks in
+Kali. It is still not a Rust-to-SBB interoperability result.
 
 ## CLI
 
@@ -98,13 +106,13 @@ RedL transport stubs:
 - `redtri_SendMessage`
 - `redtri_ReadMessage`
 
-The function signatures are local skeleton signatures until Step 8D confirms the
-exact SBB headers and links against the real SBB modules.
+The function signatures are local skeleton signatures until a later integration
+step confirms the exact SBB headers and links against the real SBB modules.
 
 ## Remaining Step 8E Work
 
-- Run the recorded Kali CMake/Ninja commands in the Kali environment.
-- Confirm the wrapper skeleton compiles with the available C compiler.
 - Replace local skeleton function signatures only if SBB headers require it.
 - Keep the wrapper outside Rust protocol code.
 - Link external SBB libraries only after the exact include/library layout is confirmed.
+- Implement real UDP behavior only in the wrapper, not in Rust `rasta-core`.
+- Preserve the current no-interop claim until a real SBB connection is observed.
