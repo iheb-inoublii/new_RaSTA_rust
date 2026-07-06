@@ -439,9 +439,22 @@ New smoke test:
 
 ## Step 8H SBB-To-SBB Receive Path
 
-The first concurrent SBB-to-SBB baseline failed in a useful way: active emitted
-UDP frames, but passive stayed `Closed` and never logged UDP receive,
-`redtri_ReadMessage`, or `redtrn_MessageReceivedNotification`.
+The first concurrent SBB-to-SBB baseline failed in a useful way: passive stayed
+`Closed` and never logged UDP receive, `redtri_ReadMessage`, or
+`redtrn_MessageReceivedNotification`.
+
+Follow-up tcpdump evidence showed the packet direction was wrong:
+
+```text
+127.0.0.1.7000 > 127.0.0.1.7100 length 58
+127.0.0.1.7001 > 127.0.0.1.7101 length 58
+127.0.0.1.7000 > 127.0.0.1.7100 length 48
+127.0.0.1.7001 > 127.0.0.1.7101 length 48
+```
+
+The passive process was sending from ports `7000/7001` to active ports
+`7100/7101`; the expected initial direction is active `7100/7101` to passive
+`7000/7001`.
 
 Root cause:
 
@@ -450,6 +463,10 @@ Root cause:
 - That notification reads the datagram through `redtri_ReadMessage`.
 - The wrapper previously waited for `redtri_ReadMessage` before polling UDP, so
   RedL never learned that transport data was available.
+- The wrapper had active/passive SafRetL IDs inverted. SBB tests and
+  `srcor_IsConnRoleServer` show that `sender_id > receiver_id` means server.
+  Therefore active must use `0x61 -> 0x62`, while passive/server uses
+  `0x62 -> 0x61`.
 
 Step 8H changes the wrapper receive path:
 
@@ -459,8 +476,9 @@ Step 8H changes the wrapper receive path:
 4. Let SBB RedL call `redtri_ReadMessage`.
 5. Return the pending datagram exactly once, then restore no-message behavior.
 
-The wrapper also opens the passive SafRetL connection path so passive enters
-SBB's server/listening state instead of leaving the RedL channel closed.
+The wrapper also keeps the passive SafRetL open call, because SBB state-machine
+tests show that opening a server-role connection moves it to `Down`/listen
+without sending `ConnReq`.
 
 New smoke test:
 
@@ -506,6 +524,6 @@ Result:
 
 ## Remaining Work After Step 8G
 
-1. Run the Step 8H SBB-to-SBB wrapper baseline in Kali.
+1. Run the corrected Step 8H SBB-to-SBB wrapper baseline in Kali and confirm packet direction is active `7100/7101` to passive `7000/7001`.
 2. Run Rust active to SBB passive with captured traces only after SBB-to-SBB is understood.
 3. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.

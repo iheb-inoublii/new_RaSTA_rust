@@ -234,15 +234,24 @@ Verified Kali SafRetL run-loop result:
 
 ## Step 8H Receive Notification Path
 
-The first concurrent SBB-to-SBB baseline attempt showed that the active wrapper
-sent UDP frames, but the passive wrapper stayed `Closed` for 30 seconds and did
-not log any UDP receive, `redtri_ReadMessage`, or
-`redtrn_MessageReceivedNotification` activity.
+The first concurrent SBB-to-SBB baseline attempt showed that the passive wrapper
+stayed `Closed` for 30 seconds and did not log any UDP receive,
+`redtri_ReadMessage`, or `redtrn_MessageReceivedNotification` activity.
+
+A later tcpdump run clarified packet direction:
+
+```text
+127.0.0.1.7000 > 127.0.0.1.7100 length 58
+127.0.0.1.7001 > 127.0.0.1.7101 length 58
+127.0.0.1.7000 > 127.0.0.1.7100 length 48
+127.0.0.1.7001 > 127.0.0.1.7101 length 48
+```
 
 Observed failed attempt:
 
-- active sent UDP frames with length `58`
-- passive stayed `Closed`
+- passive sent UDP frames from `7000/7001` to active `7100/7101`
+- expected initial direction was active `7100/7101` to passive `7000/7001`
+- passive stayed `Closed` or did not progress to `Up`
 - passive did not process incoming UDP into RedL/SafRetL
 
 Root cause:
@@ -253,6 +262,10 @@ Root cause:
 - `redtrn_MessageReceivedNotification` then calls `redtri_ReadMessage`.
 - The wrapper previously read UDP directly from `redtri_ReadMessage`, so RedL
   was never notified that incoming transport data existed.
+- The wrapper also inverted SBB SafRetL role IDs. SBB's
+  `srcor_IsConnRoleServer` treats `sender_id > receiver_id` as server/passive,
+  so the passive wrapper had been configured as the client and sent the initial
+  frames.
 
 Implemented wrapper fix:
 
@@ -262,8 +275,11 @@ Implemented wrapper fix:
 - make `redtri_ReadMessage` consume the pending datagram instead of reading the
   socket directly
 - keep no-message behavior after the pending datagram is consumed
-- open the passive SafRetL connection too, so SBB moves the passive side into
-  the server/listening path instead of leaving RedL closed
+- configure active as client with `0x61 -> 0x62`
+- configure passive as server/listener with `0x62 -> 0x61`
+- keep passive `srapi_OpenConnection`, because SBB state-machine tests show a
+  server open event moves the connection to `Down`/listen without sending
+  `ConnReq`
 
 New transport notification smoke test:
 
@@ -311,9 +327,11 @@ For now, the executable logs Step 8G SafRetL run-loop smoke status, prints
 settings, opens two nonblocking UDP sockets, initializes the RedL adapter and
 SafRetL, runs `srapi_CheckTimings`/state/read polling for `--run-seconds`, and
 closes sockets. Both roles call `srapi_OpenConnection`: active uses the client
-ID ordering and passive uses the server/listening ID ordering. Sample Ping
-payloads are sent only if SafRetL reports `Up`. This still does not establish
-or claim Rust-to-SBB interoperability.
+ID ordering `0x61 -> 0x62` and passive uses the server/listening ID ordering
+`0x62 -> 0x61`. Startup logs print the selected connection ID, sender ID,
+receiver ID, network ID, and whether `srapi_OpenConnection` is called. Sample
+Ping payloads are sent only if SafRetL reports `Up`. This still does not
+establish or claim Rust-to-SBB interoperability.
 
 ## Ping/Pong Payload
 

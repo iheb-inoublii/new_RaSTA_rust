@@ -54,6 +54,12 @@ Run smoke tests:
 Run concurrent baseline:
 
 ```sh
+sudo tcpdump -ni lo udp port 7000 or udp port 7001 or udp port 7100 or udp port 7101
+```
+
+In another shell:
+
+```sh
 rm -f /tmp/sbb-passive.log /tmp/sbb-active.log
 ./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-passive.log 2>&1 &
 sleep 1
@@ -68,6 +74,7 @@ cat /tmp/sbb-active.log
 - Passive logs transport polling into a pending slot.
 - Passive logs `redtrn_MessageReceivedNotification`.
 - `redtri_ReadMessage` consumes pending datagrams exactly once.
+- tcpdump shows initial connection frames from active ports `7100/7101` to passive ports `7000/7001`.
 - Active does not immediately close because passive missed all incoming frames.
 - Ideally the SBB-to-SBB connection reaches `Up`.
 - If it does not reach `Up`, logs document the exact state and return-code behavior.
@@ -76,10 +83,19 @@ cat /tmp/sbb-active.log
 ## Previous failed result
 
 - Passive and active were run at the same time.
-- Active sent UDP frames with length `58`.
-- Passive stayed `Closed` for 30 seconds.
+- tcpdump showed packets from passive ports `7000/7001` to active ports `7100/7101`:
+
+  ```text
+  127.0.0.1.7000 > 127.0.0.1.7100 length 58
+  127.0.0.1.7001 > 127.0.0.1.7101 length 58
+  127.0.0.1.7000 > 127.0.0.1.7100 length 48
+  127.0.0.1.7001 > 127.0.0.1.7101 length 48
+  ```
+
+- Expected initial direction is active ports `7100/7101` to passive ports `7000/7001`.
+- Passive stayed `Closed` or did not progress to `Up`.
 - Passive did not log UDP receive, `redtri_ReadMessage`, or `redtrn_MessageReceivedNotification`.
-- Root cause: the wrapper did not poll UDP and notify SBB RedL before RedL attempted to read transport data.
+- Root causes: the wrapper did not poll UDP and notify SBB RedL before RedL attempted to read transport data, and the wrapper had SBB active/passive ID ordering inverted.
 
 ## Implemented fix
 
@@ -87,11 +103,13 @@ cat /tmp/sbb-active.log
 - Received datagrams are stored in a fixed pending slot per transport channel.
 - The wrapper calls `redtrn_MessageReceivedNotification` when a pending datagram exists and RedL is initialized.
 - `redtri_ReadMessage` consumes the pending datagram instead of directly polling UDP.
-- Passive also calls `srapi_OpenConnection` so SBB opens the RedL channel for server/listening behavior.
+- Active is configured as SBB client with sender `0x61` and receiver `0x62`.
+- Passive is configured as SBB server/listener with sender `0x62` and receiver `0x61`.
+- Passive still calls `srapi_OpenConnection`, because SBB state-machine tests show server open transitions to `Down`/listen without sending `ConnReq`.
 
 ## Actual result
 
-Pending Kali validation after Step 8H fix.
+Pending Kali validation after Step 8H role-direction fix.
 
 ## Postconditions
 
