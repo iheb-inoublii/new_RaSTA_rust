@@ -52,6 +52,42 @@ static const srcty_SafetyRetransmissionConfiguration k_safretl_config = {
         600U,
     },
 };
+
+static const srcty_SafetyRetransmissionConfiguration k_safretl_active_config = {
+    .rasta_network_id = SBB_WRAPPER_SAFRETL_NETWORK_ID,
+    .t_max = 750U,
+    .t_h = 300U,
+    .safety_code_type = srcty_kSafetyCodeTypeLowerMd4,
+    .m_w_a = 10U,
+    .n_send_max = 20U,
+    .n_max_packet = 1U,
+    .n_diag_window = 5000U,
+    .number_of_connections = 2U,
+    {
+        {
+            .connection_id = 0U,
+            .sender_id = SBB_WRAPPER_SAFRETL_RECEIVER_ID,
+            .receiver_id = SBB_WRAPPER_SAFRETL_SENDER_ID,
+        },
+        {
+            .connection_id = 1U,
+            .sender_id = 3U,
+            .receiver_id = 1U,
+        },
+    },
+    {
+        .init_a = 0x67452301U,
+        .init_b = 0xEFCDAB89U,
+        .init_c = 0x98BADCFEU,
+        .init_d = 0x10325476U,
+    },
+    {
+        150U,
+        300U,
+        450U,
+        600U,
+    },
+};
 #endif
 
 static void trace_result(const SbbEndpoint *endpoint, const char *label, radef_RaStaReturnCode result)
@@ -98,7 +134,7 @@ radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint)
     radef_RaStaReturnCode result;
 
     sradin_Init();
-    result = srapi_Init(&k_safretl_config);
+    result = srapi_Init(endpoint->role == SBB_ENDPOINT_ROLE_ACTIVE ? &k_safretl_active_config : &k_safretl_config);
     endpoint->initialized = (result == radef_kNoError);
     trace_result(endpoint, "srapi_Init", result);
     return result;
@@ -114,14 +150,9 @@ radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint)
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result;
 
-    if (endpoint->role == SBB_ENDPOINT_ROLE_PASSIVE) {
-        endpoint->open_requested = 0;
-        return radef_kNoError;
-    }
-
     result = srapi_OpenConnection(
-        SBB_WRAPPER_SAFRETL_SENDER_ID,
-        SBB_WRAPPER_SAFRETL_RECEIVER_ID,
+        endpoint->role == SBB_ENDPOINT_ROLE_ACTIVE ? SBB_WRAPPER_SAFRETL_RECEIVER_ID : SBB_WRAPPER_SAFRETL_SENDER_ID,
+        endpoint->role == SBB_ENDPOINT_ROLE_ACTIVE ? SBB_WRAPPER_SAFRETL_SENDER_ID : SBB_WRAPPER_SAFRETL_RECEIVER_ID,
         SBB_WRAPPER_SAFRETL_NETWORK_ID,
         &endpoint->connection_id);
     endpoint->open_requested = (result == radef_kNoError);
@@ -139,9 +170,12 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
     sraty_ConnectionStates state = sraty_kConnectionNotInitialized;
     sraty_BufferUtilisation buffer_utilisation = {0};
     uint16_t opposite_buffer_size = 0U;
-    radef_RaStaReturnCode result = srapi_CheckTimings();
+    radef_RaStaReturnCode result;
 
     endpoint->poll_count += 1U;
+    sbb_wrapper_transport_poll_all();
+
+    result = srapi_CheckTimings();
     if (result != radef_kNoError) {
         trace_result(endpoint, "srapi_CheckTimings", result);
         return result;

@@ -126,9 +126,9 @@ SBB transport notification entry point inspected:
 
 - `redtrn_MessageReceivedNotification`
 
-The wrapper currently uses `redint_CheckTimings` before `redint_ReadMessage` so
-RedL can poll pending transport messages. Direct notification wiring remains a
-future option once the full SafRetL/SBB run loop is in place.
+Step 8F used `redint_CheckTimings` before `redint_ReadMessage` as the first
+RedL smoke path. Step 8H supersedes that receive path by polling UDP into fixed
+pending slots and invoking `redtrn_MessageReceivedNotification`.
 
 Bridge smoke test command:
 
@@ -210,6 +210,7 @@ cmake --build interop/sbb-wrapper/build
 ./interop/sbb-wrapper/build/udp_transport_test
 ./interop/sbb-wrapper/build/sbb_adapter_bridge_test
 ./interop/sbb-wrapper/build/sbb_safretl_smoke_test
+./interop/sbb-wrapper/build/sbb_transport_notification_test
 ./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --run-seconds 5
 ./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace --run-seconds 5
 ```
@@ -230,6 +231,59 @@ Verified Kali SafRetL run-loop result:
 - Passive single-process smoke reported `srapi_Init result=0`, stayed `Closed` because no active peer was running, and shut down cleanly.
 - Active single-process smoke reported `srapi_Init result=0` and `srapi_OpenConnection result=0`, sent length `58` and `48` frames, moved `Start` then `Closed` because no passive peer was running at the same time, and shut down cleanly.
 - Runtime log says Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed.
+
+## Step 8H Receive Notification Path
+
+The first concurrent SBB-to-SBB baseline attempt showed that the active wrapper
+sent UDP frames, but the passive wrapper stayed `Closed` for 30 seconds and did
+not log any UDP receive, `redtri_ReadMessage`, or
+`redtrn_MessageReceivedNotification` activity.
+
+Observed failed attempt:
+
+- active sent UDP frames with length `58`
+- passive stayed `Closed`
+- passive did not process incoming UDP into RedL/SafRetL
+
+Root cause:
+
+- SBB RedL expects the transport layer to call
+  `redtrn_MessageReceivedNotification(transport_channel_id)` after a datagram
+  arrives.
+- `redtrn_MessageReceivedNotification` then calls `redtri_ReadMessage`.
+- The wrapper previously read UDP directly from `redtri_ReadMessage`, so RedL
+  was never notified that incoming transport data existed.
+
+Implemented wrapper fix:
+
+- poll UDP sockets during the SafRetL run loop
+- store each received datagram in a fixed pending slot per transport channel
+- call `redtrn_MessageReceivedNotification` after pending data is available
+- make `redtri_ReadMessage` consume the pending datagram instead of reading the
+  socket directly
+- keep no-message behavior after the pending datagram is consumed
+- open the passive SafRetL connection too, so SBB moves the passive side into
+  the server/listening path instead of leaving RedL closed
+
+New transport notification smoke test:
+
+```sh
+./interop/sbb-wrapper/build/sbb_transport_notification_test
+```
+
+Expected concurrent SBB-to-SBB baseline command:
+
+```sh
+rm -f /tmp/sbb-passive.log /tmp/sbb-active.log
+./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-passive.log 2>&1 &
+sleep 1
+./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-active.log 2>&1
+cat /tmp/sbb-passive.log
+cat /tmp/sbb-active.log
+```
+
+This remains SBB-wrapper-only and still does not claim Rust-to-SBB
+interoperability.
 
 The CLI runtime log now says:
 
@@ -256,9 +310,10 @@ Default port mapping:
 For now, the executable logs Step 8G SafRetL run-loop smoke status, prints
 settings, opens two nonblocking UDP sockets, initializes the RedL adapter and
 SafRetL, runs `srapi_CheckTimings`/state/read polling for `--run-seconds`, and
-closes sockets. Active mode calls `srapi_OpenConnection`; sample Ping payloads
-are sent only if SafRetL reports `Up`. This still does not establish or claim
-Rust-to-SBB interoperability.
+closes sockets. Both roles call `srapi_OpenConnection`: active uses the client
+ID ordering and passive uses the server/listening ID ordering. Sample Ping
+payloads are sent only if SafRetL reports `Up`. This still does not establish
+or claim Rust-to-SBB interoperability.
 
 ## Ping/Pong Payload
 
@@ -286,8 +341,12 @@ RedL transport adapter:
 - `redtri_Init`
 - `redtri_SendMessage`
 - `redtri_ReadMessage`
+- `redtrn_MessageReceivedNotification`
 
-The RedL adapter functions now delegate to wrapper UDP transport.
+The RedL send path delegates to wrapper UDP transport. The receive path polls
+UDP into a fixed pending transport slot, notifies RedL with
+`redtrn_MessageReceivedNotification`, and lets `redtri_ReadMessage` consume the
+pending datagram when RedL asks for it.
 
 The function signatures have been aligned to the SBB public headers. If the SBB
 checkout is not provided, the wrapper keeps fallback definitions for standalone
@@ -296,6 +355,5 @@ smoke builds.
 ## Remaining Work After Step 8G
 
 - Keep the wrapper outside Rust protocol code.
-- Implement bounded queues if SBB requires asynchronous adapter reads.
-- Run an SBB-to-SBB wrapper baseline.
+- Run the Step 8H SBB-to-SBB wrapper baseline in Kali.
 - Preserve the current no-interop claim until a real SBB connection is observed.

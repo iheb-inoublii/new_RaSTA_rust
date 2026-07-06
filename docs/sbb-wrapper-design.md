@@ -163,7 +163,7 @@ Step 8C should confirm exact payload bytes against `crates/rasta-core/src/applic
 - Exact SBB timing check function name must be confirmed from `srapi_sr_api.h` and implementation files.
 - Mapping from RedL channels to SafRetL connection ID must be confirmed.
 - It is unclear whether SBB expects an active/passive distinction or whether both sides call open.
-- It is unclear whether SBB requires notification callbacks in addition to polling.
+- Step 8H confirmed SBB RedL requires transport notification through `redtrn_MessageReceivedNotification` after UDP receive.
 - Exact connection state enum values must be recorded.
 - Timestamp behavior must be checked against Rust strict/local timestamp handling; peer-relative compatibility might be needed.
 - Rust must eventually support SBB network ID `123456` and IDs `0x61`/`0x62` through a profile or CLI config path.
@@ -294,7 +294,8 @@ Implemented:
 - Real UDP-backed behavior for `redtri_Init`, `redtri_SendMessage`, and `redtri_ReadMessage`.
 - `sradin_ReadMessage` returns `radef_kNoMessageReceived` when RedL has no queued message.
 - SBB SafRetL public API calls for init, active open, timing checks, state reads, application send/read, and close.
-- CLI smoke opens sockets, initializes RedL/SafRetL, polls for `--run-seconds`, and closes sockets before exiting.
+- CLI smoke opens sockets, initializes RedL/SafRetL, polls UDP and SafRetL for `--run-seconds`, and closes sockets before exiting.
+- UDP receive data is stored in a fixed pending transport slot before RedL is notified with `redtrn_MessageReceivedNotification`.
 - Ping/Pong payload encoding and decoding using tag `0x03` / `0x04` plus little-endian `u32`.
 
 Stubbed:
@@ -317,9 +318,9 @@ The wrapper uses these exact SBB RedL public functions from
 
 The transport notification entry point
 `redtrn_MessageReceivedNotification` was inspected in
-`rasta_redundancy/redtrn_transport_notifications.h`. The wrapper currently uses
-`redint_CheckTimings` to let RedL poll pending transport messages before
-`redint_ReadMessage`.
+`rasta_redundancy/redtrn_transport_notifications.h`. Step 8F used
+`redint_CheckTimings` for the first RedL smoke path; Step 8H adds the real
+transport notification receive path.
 
 New bridge test:
 
@@ -436,6 +437,48 @@ New smoke test:
 ./interop/sbb-wrapper/build/sbb_safretl_smoke_test
 ```
 
+## Step 8H SBB-To-SBB Receive Path
+
+The first concurrent SBB-to-SBB baseline failed in a useful way: active emitted
+UDP frames, but passive stayed `Closed` and never logged UDP receive,
+`redtri_ReadMessage`, or `redtrn_MessageReceivedNotification`.
+
+Root cause:
+
+- SBB RedL's transport notification API is
+  `redtrn_MessageReceivedNotification(const uint32_t transport_channel_id)`.
+- That notification reads the datagram through `redtri_ReadMessage`.
+- The wrapper previously waited for `redtri_ReadMessage` before polling UDP, so
+  RedL never learned that transport data was available.
+
+Step 8H changes the wrapper receive path:
+
+1. Poll each UDP socket during the SafRetL run loop.
+2. Store a received datagram in a fixed-size pending slot for that transport channel.
+3. Call `redtrn_MessageReceivedNotification`.
+4. Let SBB RedL call `redtri_ReadMessage`.
+5. Return the pending datagram exactly once, then restore no-message behavior.
+
+The wrapper also opens the passive SafRetL connection path so passive enters
+SBB's server/listening state instead of leaving the RedL channel closed.
+
+New smoke test:
+
+```sh
+./interop/sbb-wrapper/build/sbb_transport_notification_test
+```
+
+Expected concurrent baseline command:
+
+```sh
+rm -f /tmp/sbb-passive.log /tmp/sbb-active.log
+./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-passive.log 2>&1 &
+sleep 1
+./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-active.log 2>&1
+cat /tmp/sbb-passive.log
+cat /tmp/sbb-active.log
+```
+
 ### Kali Validation Result
 
 The real Kali validation used:
@@ -463,7 +506,6 @@ Result:
 
 ## Remaining Work After Step 8G
 
-1. Implement bounded receive queues for `sradin_ReadMessage` if SBB requires asynchronous adapter handoff.
-2. Run an SBB-to-SBB wrapper baseline before Rust-to-SBB.
-3. Run Rust active to SBB passive with captured traces.
-4. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.
+1. Run the Step 8H SBB-to-SBB wrapper baseline in Kali.
+2. Run Rust active to SBB passive with captured traces only after SBB-to-SBB is understood.
+3. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.

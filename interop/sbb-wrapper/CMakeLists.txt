@@ -90,3 +90,11 @@ add_executable(sbb_safretl_smoke_test
 target_link_libraries(sbb_safretl_smoke_test PRIVATE sbb_wrapper_common)
 
 add_test(NAME sbb_safretl_smoke_test COMMAND sbb_safretl_smoke_test)
+
+add_executable(sbb_transport_notification_test
+    tests/sbb_transport_notification_test.c
+)
+
+target_link_libraries(sbb_transport_notification_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME sbb_transport_notification_test COMMAND sbb_transport_notification_test)

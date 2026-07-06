@@ -1,0 +1,118 @@
+# SBB Wrapper SBB-To-SBB Baseline
+
+## Objective
+
+Verify the SBB wrapper can process incoming UDP datagrams through SBB RedL/SafRetL in a concurrent two-process SBB-to-SBB baseline.
+
+## Related requirement
+
+Supervisor Step 8H: fix the SBB wrapper receive path so incoming UDP datagrams notify SBB RedL and can be consumed by SafRetL.
+
+## Preconditions
+
+- The Rust repository is available in Kali/Linux.
+- SBB checkout exists at `$HOME/Desktop/sbb-investigation/sbb-rasta-stack`.
+- CMake, Ninja, and a C compiler are available.
+- Step 8G SafRetL run-loop smoke validation has passed.
+- Rust protocol behavior, Rust profiles, Docker setup, and Rust applications are unchanged.
+
+## Test setup
+
+- Build the wrapper with real `SBB_ROOT`.
+- Run passive and active wrapper processes concurrently on loopback.
+- Capture passive and active logs separately.
+- Use the default two-channel UDP mapping.
+
+## Test data
+
+- remote IP: `127.0.0.1`
+- rounds: `3`
+- run duration: `30 seconds`
+- passive local ports: `7000`, `7001`
+- active local ports: `7100`, `7101`
+- RedL transport notification function: `redtrn_MessageReceivedNotification`
+
+## Test steps
+
+Build:
+
+```sh
+cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=$HOME/Desktop/sbb-investigation/sbb-rasta-stack
+cmake --build interop/sbb-wrapper/build
+```
+
+Run smoke tests:
+
+```sh
+./interop/sbb-wrapper/build/ping_pong_payload_test
+./interop/sbb-wrapper/build/udp_transport_test
+./interop/sbb-wrapper/build/sbb_adapter_bridge_test
+./interop/sbb-wrapper/build/sbb_safretl_smoke_test
+./interop/sbb-wrapper/build/sbb_transport_notification_test
+```
+
+Run concurrent baseline:
+
+```sh
+rm -f /tmp/sbb-passive.log /tmp/sbb-active.log
+./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-passive.log 2>&1 &
+sleep 1
+./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-active.log 2>&1
+cat /tmp/sbb-passive.log
+cat /tmp/sbb-active.log
+```
+
+## Expected result
+
+- Passive logs UDP receive activity.
+- Passive logs transport polling into a pending slot.
+- Passive logs `redtrn_MessageReceivedNotification`.
+- `redtri_ReadMessage` consumes pending datagrams exactly once.
+- Active does not immediately close because passive missed all incoming frames.
+- Ideally the SBB-to-SBB connection reaches `Up`.
+- If it does not reach `Up`, logs document the exact state and return-code behavior.
+- No Rust-to-SBB interoperability is claimed.
+
+## Previous failed result
+
+- Passive and active were run at the same time.
+- Active sent UDP frames with length `58`.
+- Passive stayed `Closed` for 30 seconds.
+- Passive did not log UDP receive, `redtri_ReadMessage`, or `redtrn_MessageReceivedNotification`.
+- Root cause: the wrapper did not poll UDP and notify SBB RedL before RedL attempted to read transport data.
+
+## Implemented fix
+
+- The wrapper polls UDP sockets during the SafRetL run loop.
+- Received datagrams are stored in a fixed pending slot per transport channel.
+- The wrapper calls `redtrn_MessageReceivedNotification` when a pending datagram exists and RedL is initialized.
+- `redtri_ReadMessage` consumes the pending datagram instead of directly polling UDP.
+- Passive also calls `srapi_OpenConnection` so SBB opens the RedL channel for server/listening behavior.
+
+## Actual result
+
+Pending Kali validation after Step 8H fix.
+
+## Postconditions
+
+- Rust protocol code remains unchanged.
+- No Rust `sbb-local` profile is added.
+- No Docker setup is added.
+- No Rust-to-SBB interoperability claim is made.
+
+## Evidence
+
+- `interop/sbb-wrapper/src/sbb_adapter.c`
+- `interop/sbb-wrapper/src/sbb_endpoint.c`
+- `interop/sbb-wrapper/tests/sbb_transport_notification_test.c`
+- `interop/sbb-wrapper/src/main.c`
+
+## Automation status
+
+Partially automated. Smoke tests are automated in CMake. The two-process baseline is command-driven and requires Kali/Linux.
+
+## Open points
+
+- Verify whether the two-process baseline reaches `Up`.
+- If it does not reach `Up`, preserve logs and identify the next SBB return-code or state-machine blocker.
+- Do not attempt Rust-to-SBB until SBB-to-SBB behavior is understood.

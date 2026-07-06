@@ -132,6 +132,7 @@ Run wrapper CLI smoke tests:
 - `interop/sbb-wrapper/src/sbb_safety_notifications.c`
 - `interop/sbb-wrapper/src/main.c`
 - `interop/sbb-wrapper/tests/sbb_safretl_smoke_test.c`
+- `interop/sbb-wrapper/tests/sbb_transport_notification_test.c`
 - `interop/sbb-wrapper/CMakeLists.txt`
 
 ## Automation status
@@ -141,5 +142,5 @@ Partially automated. Rust validation can run on Windows. SBB wrapper configure, 
 ## Open points
 
 - Add bounded queues if SBB requires asynchronous adapter handoff.
-- Run an SBB-to-SBB wrapper baseline.
+- Step 8H adds the missing RedL transport notification receive path for the SBB-to-SBB wrapper baseline.
 - Do not attempt Rust-to-SBB until SBB-to-SBB wrapper behavior is understood.

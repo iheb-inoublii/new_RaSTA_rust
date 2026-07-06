@@ -62,4 +62,8 @@ radef_RaStaReturnCode redtri_ReadMessage(
     uint8_t *message_buffer);
 #endif
 
+void sbb_wrapper_transport_poll_all(void);
+int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id);
+uint32_t sbb_wrapper_transport_pending_count(uint32_t transport_channel_id);
+
 #endif
