@@ -16,6 +16,9 @@
 #define RADEF_MAX_SR_LAYER_PAYLOAD_DATA_SIZE 1055U
 #endif
 
+uint32_t sbb_endpoint_local_sender_id(const SbbEndpoint *endpoint);
+uint32_t sbb_endpoint_remote_receiver_id(const SbbEndpoint *endpoint);
+
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
 static const srcty_SafetyRetransmissionConfiguration k_safretl_active_config = {
     .rasta_network_id = SBB_WRAPPER_SAFRETL_NETWORK_ID,
