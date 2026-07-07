@@ -326,12 +326,15 @@ Additional fix:
 
 Current Kali result:
 
-- The SBB-to-SBB wrapper baseline reaches `Up`.
+- Both active and passive SBB wrapper processes reach `Up`.
 - Passive logs `srapi_GetConnectionState: connection=0 result=0 state=Up`.
 - Passive receives a heartbeat frame with `sr_type=0x184c(Heartbeat)`.
 - Passive receives a disconnect request with `sr_type=0x1848(DiscReq)`.
 - Passive transitions to `Closed` through
   `srnot_ConnectionStateNotification connection=0 state=1(Closed)`.
+- Active already exits cleanly with `connection closed after Up; graceful
+  SBB-to-SBB smoke complete` and skips `srapi_CloseConnection` because the
+  connection is already closed after `Up`.
 - This proves the SBB-to-SBB baseline connection works.
 
 Post-disconnect fix:
@@ -340,14 +343,20 @@ Post-disconnect fix:
   the channel, which could trigger `rasys_FatalError` with
   `InvalidParameter` or `InternalError` in
   `sradin_ReadMessage:redint_ReadMessage`.
-- The wrapper now records that the endpoint reached `Up`, detects
-  `Closed` after `Up`, and treats that as graceful completion for the Step 8H
-  smoke test.
+- The wrapper now records `Up` and `Closed after Up` both from endpoint state
+  polling and directly from `srnot_ConnectionStateNotification`.
+- This matters for passive, where `DiscReq` can close the connection while the
+  wrapper is still inside the RedL/SafRetL notification callback stack.
+- Once the global `Closed after Up` latch is set, `sradin_ReadMessage` returns
+  no-message instead of entering `redint_ReadMessage`.
+- Transport polling also stops notifying RedL once the latch is set.
 - Once `Closed` after `Up` is observed, the run loop exits before calling
   `srapi_ReadData`, before another poll cycle, and before any further
   `sradin_ReadMessage` / `redint_ReadMessage` path.
 - `srapi_CloseConnection` is skipped if the connection already closed after
   reaching `Up`.
+- Step 8H success condition is `Up`, heartbeat, `DiscReq`/`Closed`, and no
+  `rasys_FatalError` in the normal run.
 
 Fatal diagnostics added:
 

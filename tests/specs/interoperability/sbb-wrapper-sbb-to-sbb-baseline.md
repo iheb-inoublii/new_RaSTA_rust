@@ -87,8 +87,11 @@ cat /tmp/sbb-active.log
 - `redtri_ReadMessage` consumes pending datagrams exactly once.
 - tcpdump shows initial connection frames from active ports `7100/7101` to passive ports `7000/7001`.
 - Active does not immediately close because passive missed all incoming frames.
-- Ideally the SBB-to-SBB connection reaches `Up`.
-- If it does not reach `Up`, logs document the exact state and return-code behavior.
+- Both active and passive reach `Up`.
+- Passive receives heartbeat.
+- Passive receives `DiscReq`.
+- Passive observes `Closed`.
+- Normal run exits without `rasys_FatalError`.
 - No Rust-to-SBB interoperability is claimed.
 
 ## Previous failed result
@@ -150,21 +153,24 @@ SBB connection matching finding:
 
 Latest Kali result:
 
-- The SBB-to-SBB wrapper baseline reaches `Up`.
+- Both active and passive SBB wrapper processes reach `Up`.
 - Passive logs `srapi_GetConnectionState: connection=0 result=0 state=Up`.
 - Passive receives heartbeat frame `sr_type=0x184c(Heartbeat)`.
 - Passive receives disconnect request frame `sr_type=0x1848(DiscReq)`.
 - Passive transitions to `Closed` through `srnot_ConnectionStateNotification connection=0 state=1(Closed)`.
+- Active exits cleanly with `connection closed after Up; graceful SBB-to-SBB smoke complete` and skips `srapi_CloseConnection` because the connection is already closed after `Up`.
 - This proves the SBB-to-SBB baseline connection works.
 
 Post-disconnect fix:
 
 - After the disconnect, the wrapper continued polling/reading RedL/SafRetL after SBB had closed the RedL channel.
 - That post-close read path could call `sradin_ReadMessage` / `redint_ReadMessage` and trigger `rasys_FatalError reason=6(InvalidParameter)` or `reason=16(InternalError)`.
-- The wrapper now records when the connection has reached `Up`.
-- If the state later becomes `Closed`, the run loop treats it as normal graceful completion for the SBB-to-SBB smoke test.
+- The wrapper now records `Up` and `Closed after Up` from both endpoint state polling and `srnot_ConnectionStateNotification`.
+- This handles passive close processing, where `DiscReq` can close the connection while the wrapper is still inside the RedL/SafRetL notification callback stack.
+- Once the global `Closed after Up` latch is set, `sradin_ReadMessage` returns no-message instead of entering `redint_ReadMessage`, and transport polling stops notifying RedL.
 - Once `Closed` after `Up` is observed, the wrapper stops before calling `srapi_ReadData`, before another poll cycle, and before any further `sradin_ReadMessage` / `redint_ReadMessage` path.
 - `debug_no_abort` remains diagnostic only; the normal run should not hit `rasys_FatalError`.
+- Step 8H success condition is `Up`, heartbeat, `DiscReq`/`Closed`, and no `rasys_FatalError` in the normal run.
 
 ## Postconditions
 

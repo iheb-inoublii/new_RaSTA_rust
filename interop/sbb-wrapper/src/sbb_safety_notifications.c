@@ -55,6 +55,10 @@ void srnot_ConnectionStateNotification(
             sbb_wrapper_disconnect_reason_name((int)disconnect_reason),
             (unsigned int)detailed_disconnect_reason);
     }
+    sbb_wrapper_diag_observe_connection_state((int)connection_state);
+    if (sbb_wrapper_diag_closed_after_up() && sbb_wrapper_udp_trace_enabled()) {
+        puts("[sbb-wrapper] srnot_ConnectionStateNotification observed Closed after Up; stopping SBB baseline polling");
+    }
 }
 
 void srnot_SrDiagnosticNotification(

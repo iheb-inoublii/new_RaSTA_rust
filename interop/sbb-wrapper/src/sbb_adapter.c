@@ -205,8 +205,24 @@ radef_RaStaReturnCode sradin_ReadMessage(
 
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     {
+        if (sbb_wrapper_diag_closed_after_up()) {
+            if (sbb_wrapper_udp_trace_enabled()) {
+                printf(
+                    "[sbb-wrapper] sradin_ReadMessage: channel=%u skipped because connection closed after Up\n",
+                    redundancy_channel_id);
+            }
+            return radef_kNoMessageReceived;
+        }
         sbb_wrapper_diag_set_phase("sradin_ReadMessage:redint_CheckTimings");
         radef_RaStaReturnCode timing_result = redint_CheckTimings();
+        if (sbb_wrapper_diag_closed_after_up()) {
+            if (sbb_wrapper_udp_trace_enabled()) {
+                printf(
+                    "[sbb-wrapper] sradin_ReadMessage: channel=%u redint_ReadMessage skipped after redint_CheckTimings because connection closed after Up\n",
+                    redundancy_channel_id);
+            }
+            return radef_kNoMessageReceived;
+        }
         sbb_wrapper_diag_set_phase("sradin_ReadMessage:redint_ReadMessage");
         radef_RaStaReturnCode read_result = redint_ReadMessage(redundancy_channel_id, buffer_size, message_size, message_buffer);
         printf(
@@ -321,6 +337,15 @@ int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id)
         return -1;
     }
 
+    if (sbb_wrapper_diag_closed_after_up()) {
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] transport poll: channel=%u skipped because connection closed after Up\n",
+                transport_channel_id);
+        }
+        return 0;
+    }
+
     if (slot->occupied) {
         if (sbb_wrapper_udp_trace_enabled()) {
             printf(
@@ -362,6 +387,12 @@ int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id)
             transport_channel_id);
         return 1;
     }
+    if (sbb_wrapper_diag_closed_after_up()) {
+        printf(
+            "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u skipped because connection closed after Up\n",
+            transport_channel_id);
+        return 1;
+    }
     sbb_wrapper_diag_set_phase("transport_poll:redtrn_MessageReceivedNotification");
     redtrn_MessageReceivedNotification(transport_channel_id);
     printf(
@@ -381,7 +412,7 @@ void sbb_wrapper_transport_poll_all(void)
     uint32_t i;
     for (i = 0u; i < SBB_WRAPPER_TRANSPORT_CHANNEL_COUNT; i += 1u) {
         (void)sbb_wrapper_transport_poll_channel(i);
-        if (sbb_wrapper_diag_has_fatal()) {
+        if (sbb_wrapper_diag_has_fatal() || sbb_wrapper_diag_closed_after_up()) {
             break;
         }
     }

@@ -7,6 +7,8 @@ static uint32_t g_sender_id = 0u;
 static uint32_t g_receiver_id = 0u;
 static int g_debug_no_abort = 0;
 static int g_has_fatal = 0;
+static int g_has_reached_up = 0;
+static int g_closed_after_up = 0;
 static radef_RaStaReturnCode g_fatal_reason = radef_kNoError;
 
 void sbb_wrapper_diag_set_context(const char *role, uint32_t connection_id, uint32_t sender_id, uint32_t receiver_id)
@@ -46,6 +48,25 @@ int sbb_wrapper_diag_has_fatal(void)
 radef_RaStaReturnCode sbb_wrapper_diag_fatal_reason(void)
 {
     return g_fatal_reason;
+}
+
+void sbb_wrapper_diag_observe_connection_state(int state)
+{
+    if (state == 4) {
+        g_has_reached_up = 1;
+    } else if (state == 1 && g_has_reached_up) {
+        g_closed_after_up = 1;
+    }
+}
+
+int sbb_wrapper_diag_has_reached_up(void)
+{
+    return g_has_reached_up;
+}
+
+int sbb_wrapper_diag_closed_after_up(void)
+{
+    return g_closed_after_up;
 }
 
 const char *sbb_wrapper_diag_role(void)
