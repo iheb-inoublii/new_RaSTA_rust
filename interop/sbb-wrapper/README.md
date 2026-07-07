@@ -281,6 +281,49 @@ Implemented wrapper fix:
   server open event moves the connection to `Down`/listen without sending
   `ConnReq`
 
+Connection matching finding:
+
+- `srapi_OpenConnection` resolves a static connection by exact `sender_id`,
+  `receiver_id`, and network.
+- SBB source inspection showed `srcor_GetConnectionId` exact sender/receiver
+  matching and `srcor_IsConnRoleServer` treating `sender_id > receiver_id` as
+  server/passive.
+- Incoming SafRetL frames are checked against the reversed peer tuple.
+- Two wrapper processes cannot connect as `0x61 <-> 0x62` if both use only the
+  same static `0x61 -> 0x62` entry.
+- The wrapper therefore keeps role-local configs: active `0x61 -> 0x62`,
+  passive `0x62 -> 0x61`. This is local to `interop/sbb-wrapper`; the external
+  SBB checkout is not modified.
+
+Follow-up Kali result after direction/receive fixes:
+
+- tcpdump showed active `7100/7101` to passive `7000/7001` for length `58` and
+  `48` frames.
+- passive logged UDP receive activity on both channels
+- passive logged transport polling into pending slots
+- `redtri_ReadMessage` consumed pending datagrams
+- `redtrn_MessageReceivedNotification` was invoked
+- passive still remained `Down`
+
+Newly identified blocker:
+
+- `rednot_MessageReceivedNotification` is the RedL-to-SafRetL adapter callback.
+- The wrapper had only logged this callback.
+- SBB expects this callback to forward into
+  `sradno_MessageReceivedNotification(red_channel_id)`.
+
+Additional fix:
+
+- `rednot_MessageReceivedNotification` now calls `sradno_MessageReceivedNotification`.
+- `rednot_DiagnosticNotification` now calls `sradno_DiagnosticNotification`.
+- trace logs include `sradno_*` return codes.
+- received RedL frame trace includes datagram length, RedL length, SafRetL
+  length, SafRetL message type from fixed offsets, and a short hex prefix.
+- endpoint trace logs include `srapi_OpenConnection`, `srapi_CheckTimings`,
+  `srapi_GetConnectionState`, and `srapi_ReadData` return codes.
+- SafRetL notification logs include state names, disconnect reason values, and
+  safety/address/type/SN/CSN diagnostic counters.
+
 New transport notification smoke test:
 
 ```sh
@@ -364,7 +407,9 @@ RedL transport adapter:
 The RedL send path delegates to wrapper UDP transport. The receive path polls
 UDP into a fixed pending transport slot, notifies RedL with
 `redtrn_MessageReceivedNotification`, and lets `redtri_ReadMessage` consume the
-pending datagram when RedL asks for it.
+pending datagram when RedL asks for it. RedL then notifies SafRetL through
+`rednot_MessageReceivedNotification`, which the wrapper forwards to
+`sradno_MessageReceivedNotification`.
 
 The function signatures have been aligned to the SBB public headers. If the SBB
 checkout is not provided, the wrapper keeps fallback definitions for standalone

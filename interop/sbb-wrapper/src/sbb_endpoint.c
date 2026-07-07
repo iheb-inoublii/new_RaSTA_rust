@@ -20,6 +20,12 @@ uint32_t sbb_endpoint_local_sender_id(const SbbEndpoint *endpoint);
 uint32_t sbb_endpoint_remote_receiver_id(const SbbEndpoint *endpoint);
 
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
+/*
+ * SBB SafRetL matches srapi_OpenConnection arguments against the static
+ * sender/receiver tuple and validates incoming frames against the reversed
+ * peer tuple. The wrapper therefore keeps role-local configs instead of
+ * modifying the external SBB checkout.
+ */
 static const srcty_SafetyRetransmissionConfiguration k_safretl_active_config = {
     .rasta_network_id = SBB_WRAPPER_SAFRETL_NETWORK_ID,
     .t_max = 750U,
@@ -100,6 +106,11 @@ static void trace_result(const SbbEndpoint *endpoint, const char *label, radef_R
     }
 }
 
+static const char *sbb_endpoint_role_name(const SbbEndpoint *endpoint)
+{
+    return endpoint->role == SBB_ENDPOINT_ROLE_ACTIVE ? "active" : "passive";
+}
+
 void sbb_endpoint_configure(SbbEndpoint *endpoint, SbbEndpointRole role, int trace)
 {
     memset(endpoint, 0, sizeof(*endpoint));
@@ -141,7 +152,7 @@ radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint)
     endpoint->initialized = (result == radef_kNoError);
     printf(
         "[sbb-wrapper] SafRetL role=%s connection_id=%u local_sender_id=0x%02x remote_receiver_id=0x%02x network_id=%u\n",
-        endpoint->role == SBB_ENDPOINT_ROLE_ACTIVE ? "active" : "passive",
+        sbb_endpoint_role_name(endpoint),
         (unsigned int)endpoint->connection_id,
         (unsigned int)sbb_endpoint_local_sender_id(endpoint),
         (unsigned int)sbb_endpoint_remote_receiver_id(endpoint),
@@ -162,7 +173,7 @@ radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint)
 
     printf(
         "[sbb-wrapper] SafRetL open: role=%s call_srapi_OpenConnection=true sender_id=0x%02x receiver_id=0x%02x network_id=%u\n",
-        endpoint->role == SBB_ENDPOINT_ROLE_ACTIVE ? "active" : "passive",
+        sbb_endpoint_role_name(endpoint),
         (unsigned int)sbb_endpoint_local_sender_id(endpoint),
         (unsigned int)sbb_endpoint_remote_receiver_id(endpoint),
         (unsigned int)SBB_WRAPPER_SAFRETL_NETWORK_ID);
@@ -173,7 +184,11 @@ radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint)
         SBB_WRAPPER_SAFRETL_NETWORK_ID,
         &endpoint->connection_id);
     endpoint->open_requested = (result == radef_kNoError);
-    trace_result(endpoint, "srapi_OpenConnection", result);
+    printf(
+        "[sbb-wrapper] srapi_OpenConnection: role=%s result=%d returned_connection_id=%u\n",
+        sbb_endpoint_role_name(endpoint),
+        result,
+        (unsigned int)endpoint->connection_id);
     return result;
 #else
     (void)endpoint;
@@ -193,8 +208,10 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
     sbb_wrapper_transport_poll_all();
 
     result = srapi_CheckTimings();
+    if (endpoint->trace) {
+        printf("[sbb-wrapper] srapi_CheckTimings result=%d\n", result);
+    }
     if (result != radef_kNoError) {
-        trace_result(endpoint, "srapi_CheckTimings", result);
         return result;
     }
 
@@ -203,12 +220,23 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
         &state,
         &buffer_utilisation,
         &opposite_buffer_size);
+    if (endpoint->trace) {
+        printf(
+            "[sbb-wrapper] srapi_GetConnectionState: connection=%u result=%d state=%s send_used=%u recv_used=%u opposite_buffer=%u\n",
+            (unsigned int)endpoint->connection_id,
+            result,
+            result == radef_kNoError ? sbb_endpoint_state_name((int)state) : "Unavailable",
+            (unsigned int)buffer_utilisation.send_buffer_used,
+            (unsigned int)buffer_utilisation.receive_buffer_used,
+            (unsigned int)opposite_buffer_size);
+    }
     if (result == radef_kNoError) {
         int state_value = (int)state;
-        if (endpoint->trace && (state_value != endpoint->last_state || (endpoint->poll_count % 100U) == 0U)) {
+        if (endpoint->trace && state_value != endpoint->last_state) {
             printf(
-                "[sbb-wrapper] connection %u state=%s send_used=%u recv_used=%u opposite_buffer=%u\n",
+                "[sbb-wrapper] connection %u state transition %s -> %s send_used=%u recv_used=%u opposite_buffer=%u\n",
                 (unsigned int)endpoint->connection_id,
+                sbb_endpoint_state_name(endpoint->last_state),
                 sbb_endpoint_state_name(state_value),
                 (unsigned int)buffer_utilisation.send_buffer_used,
                 (unsigned int)buffer_utilisation.receive_buffer_used,
@@ -262,6 +290,14 @@ radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint)
         &payload_length,
         payload);
 
+    if (endpoint->trace) {
+        printf(
+            "[sbb-wrapper] srapi_ReadData: connection=%u result=%d length=%u\n",
+            (unsigned int)endpoint->connection_id,
+            result,
+            (unsigned int)payload_length);
+    }
+
     if (result == radef_kNoError) {
         SbbWrapperPayloadKind kind;
         uint32_t counter = 0U;
@@ -277,8 +313,6 @@ radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint)
                 (unsigned int)payload_length,
                 decode_result);
         }
-    } else if (endpoint->trace && result != radef_kNoMessageReceived) {
-        printf("[sbb-wrapper] srapi_ReadData result=%d\n", result);
     }
 
     return result;

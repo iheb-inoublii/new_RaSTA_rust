@@ -160,9 +160,9 @@ Step 8C should confirm exact payload bytes against `crates/rasta-core/src/applic
 
 ## Risks And Open Questions
 
-- Exact SBB timing check function name must be confirmed from `srapi_sr_api.h` and implementation files.
-- Mapping from RedL channels to SafRetL connection ID must be confirmed.
-- It is unclear whether SBB expects an active/passive distinction or whether both sides call open.
+- The SBB timing check path used by the wrapper is `srapi_CheckTimings`.
+- Mapping from RedL channels to SafRetL connection ID still needs full two-process baseline confirmation, but RedL message notifications are now forwarded into `sradno_MessageReceivedNotification`.
+- SBB expects the `srapi_OpenConnection` sender/receiver pair to match a static configured connection. Source inspection of `srcor_GetConnectionId` showed exact `sender_id` and `receiver_id` matching, and `srcor_IsConnRoleServer` treats `sender_id > receiver_id` as server/passive. Incoming SafRetL frames are checked against the reversed peer tuple. Therefore two SBB wrapper processes cannot connect as `0x61 <-> 0x62` if both use only the same static `0x61 -> 0x62` entry; the passive/server side needs a wrapper-local reversed entry `0x62 -> 0x61`.
 - Step 8H confirmed SBB RedL requires transport notification through `redtrn_MessageReceivedNotification` after UDP receive.
 - Exact connection state enum values must be recorded.
 - Timestamp behavior must be checked against Rust strict/local timestamp handling; peer-relative compatibility might be needed.
@@ -479,6 +479,43 @@ Step 8H changes the wrapper receive path:
 The wrapper also keeps the passive SafRetL open call, because SBB state-machine
 tests show that opening a server-role connection moves it to `Down`/listen
 without sending `ConnReq`.
+
+Connection matching finding:
+
+- `srapi_OpenConnection(sender_id, receiver_id, network_id, &connection_id)` resolves a configured connection by exact sender/receiver IDs.
+- Active/client uses wrapper-local connection `0x61 -> 0x62`.
+- Passive/server uses wrapper-local reversed connection `0x62 -> 0x61`.
+- The reversed passive entry is kept inside `interop/sbb-wrapper` only; the external SBB checkout is not modified.
+- Both roles still call `srapi_OpenConnection`; the role is determined by the SBB sender/receiver ordering.
+
+Follow-up Kali result after the role-direction and receive-notification fixes:
+
+- tcpdump showed active ports `7100/7101` sending to passive ports `7000/7001`.
+- passive received length `58` frames and later length `48` frames on both channels.
+- passive invoked `redtrn_MessageReceivedNotification`.
+- `redtri_ReadMessage` consumed pending datagrams.
+- passive still stayed `Down`.
+
+The next missing bridge was RedL-to-SafRetL notification. SBB RedL calls
+`rednot_MessageReceivedNotification(red_channel_id)` when a redundancy message
+is ready for the upper layer. The wrapper must forward that callback into
+`sradno_MessageReceivedNotification(red_channel_id)`, which sets SafRetL
+pending state, reads from RedL through `sradin_ReadMessage`, and advances the
+SafRetL state machine. The wrapper now forwards both RedL message and diagnostic
+notifications to `sradno_*` and logs their return codes.
+
+Trace logs now also include a bounded RedL frame prefix with RedL length,
+SafRetL length, and SafRetL message type decoded from fixed offsets where
+available.
+
+Additional SafRetL diagnostics now log:
+
+- `srapi_OpenConnection` arguments, result, and returned connection ID.
+- Each `srapi_CheckTimings` result while `--trace` is enabled.
+- Each `srapi_GetConnectionState` result while `--trace` is enabled.
+- Each `srapi_ReadData` result while `--trace` is enabled, including no-message.
+- `srnot_ConnectionStateNotification` state names and disconnect values.
+- `srnot_SrDiagnosticNotification` safety, address, type, SN, and CSN counters.
 
 New smoke test:
 

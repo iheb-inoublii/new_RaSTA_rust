@@ -15,12 +15,54 @@ typedef struct {
     uint16_t receive_buffer_free;
 } sraty_BufferUtilisation;
 typedef struct {
-    uint32_t reserved;
+    uint32_t ec_safety;
+    uint32_t ec_address;
+    uint32_t ec_type;
+    uint32_t ec_sn;
+    uint32_t ec_csn;
 } sraty_ConnectionDiagnosticData;
 typedef struct {
     uint32_t reserved;
 } sraty_RedundancyChannelDiagnosticData;
 #endif
+
+static const char *connection_state_name(int state)
+{
+    switch (state) {
+    case 0:
+        return "NotInitialized";
+    case 1:
+        return "Closed";
+    case 2:
+        return "Down";
+    case 3:
+        return "Start";
+    case 4:
+        return "Up";
+    case 5:
+        return "RetransRequest";
+    case 6:
+        return "RetransRunning";
+    default:
+        return "Unknown";
+    }
+}
+
+static const char *disconnect_reason_name(int reason)
+{
+    switch (reason) {
+    case 0:
+        return "None";
+    case 1:
+        return "Regular";
+    case 2:
+        return "Timeout";
+    case 3:
+        return "ProtocolError";
+    default:
+        return "Unknown";
+    }
+}
 
 void srnot_MessageReceivedNotification(const uint32_t connection_id)
 {
@@ -39,13 +81,15 @@ void srnot_ConnectionStateNotification(
 {
     if (sbb_wrapper_udp_trace_enabled()) {
         printf(
-            "[sbb-wrapper] srnot_ConnectionStateNotification connection=%u state=%d send_used=%u recv_used=%u opposite_buffer=%u disconnect=%d detailed=%u\n",
+            "[sbb-wrapper] srnot_ConnectionStateNotification connection=%u state=%d(%s) send_used=%u recv_used=%u opposite_buffer=%u disconnect=%d(%s) detailed=%u\n",
             (unsigned int)connection_id,
             (int)connection_state,
+            connection_state_name((int)connection_state),
             (unsigned int)buffer_utilisation.send_buffer_used,
             (unsigned int)buffer_utilisation.receive_buffer_used,
             (unsigned int)opposite_buffer_size,
             (int)disconnect_reason,
+            disconnect_reason_name((int)disconnect_reason),
             (unsigned int)detailed_disconnect_reason);
     }
 }
@@ -54,9 +98,15 @@ void srnot_SrDiagnosticNotification(
     const uint32_t connection_id,
     const sraty_ConnectionDiagnosticData connection_diagnostic_data)
 {
-    (void)connection_diagnostic_data;
     if (sbb_wrapper_udp_trace_enabled()) {
-        printf("[sbb-wrapper] srnot_SrDiagnosticNotification connection=%u\n", (unsigned int)connection_id);
+        printf(
+            "[sbb-wrapper] srnot_SrDiagnosticNotification connection=%u ec_safety=%u ec_address=%u ec_type=%u ec_sn=%u ec_csn=%u\n",
+            (unsigned int)connection_id,
+            (unsigned int)connection_diagnostic_data.ec_safety,
+            (unsigned int)connection_diagnostic_data.ec_address,
+            (unsigned int)connection_diagnostic_data.ec_type,
+            (unsigned int)connection_diagnostic_data.ec_sn,
+            (unsigned int)connection_diagnostic_data.ec_csn);
     }
 }
 

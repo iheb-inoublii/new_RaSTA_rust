@@ -107,9 +107,37 @@ cat /tmp/sbb-active.log
 - Passive is configured as SBB server/listener with sender `0x62` and receiver `0x61`.
 - Passive still calls `srapi_OpenConnection`, because SBB state-machine tests show server open transitions to `Down`/listen without sending `ConnReq`.
 
+SBB connection matching finding:
+
+- `srapi_OpenConnection` resolves a connection through exact static sender and receiver IDs.
+- `srcor_IsConnRoleServer` treats `sender_id > receiver_id` as server/passive.
+- Incoming SafRetL frame validation compares the frame sender/receiver against the local reversed peer tuple.
+- Two processes using only the same `0x61 -> 0x62` static entry cannot form the desired `0x61 <-> 0x62` baseline.
+- The wrapper-local passive configuration therefore provides the reversed `0x62 -> 0x61` entry without modifying the external SBB checkout.
+
 ## Actual result
 
-Pending Kali validation after Step 8H role-direction fix.
+- tcpdump now shows the expected active-to-passive direction:
+
+  ```text
+  127.0.0.1.7100 > 127.0.0.1.7000 length 58
+  127.0.0.1.7101 > 127.0.0.1.7001 length 58
+  127.0.0.1.7100 > 127.0.0.1.7000 length 48
+  127.0.0.1.7101 > 127.0.0.1.7001 length 48
+  ```
+
+- Passive logs UDP receive activity for length `58` and later length `48` packets on both channels.
+- Passive logs transport polling into pending slots.
+- `redtri_ReadMessage` consumes pending datagrams.
+- `redtrn_MessageReceivedNotification` is invoked.
+- Passive still remains `Down` and does not reach `Up`.
+- Newly identified blocker: wrapper `rednot_MessageReceivedNotification` logged RedL notifications but did not forward them into SBB SafRetL adapter notification `sradno_MessageReceivedNotification`.
+- Fix applied after this result: `rednot_MessageReceivedNotification` now calls `sradno_MessageReceivedNotification`, and `rednot_DiagnosticNotification` now calls `sradno_DiagnosticNotification`.
+- Additional trace logging now records RedL/SafRetL frame lengths, SafRetL message type when identifiable from fixed offsets, `sradno_*` return codes, and SafRetL diagnostic counters.
+- Additional endpoint trace logging records `srapi_OpenConnection` arguments and returned connection ID, every `srapi_CheckTimings` result, every `srapi_GetConnectionState` result, and every `srapi_ReadData` result.
+- Safety notification trace logging records state names, disconnect reason values, and diagnostic counter values for safety, address, type, SN, and CSN errors.
+
+Pending Kali validation after RedL-to-SafRetL notification bridge fix.
 
 ## Postconditions
 
@@ -121,6 +149,8 @@ Pending Kali validation after Step 8H role-direction fix.
 ## Evidence
 
 - `interop/sbb-wrapper/src/sbb_adapter.c`
+- `interop/sbb-wrapper/src/sbb_redundancy_notifications.c`
+- `interop/sbb-wrapper/src/sbb_safety_notifications.c`
 - `interop/sbb-wrapper/src/sbb_endpoint.c`
 - `interop/sbb-wrapper/tests/sbb_transport_notification_test.c`
 - `interop/sbb-wrapper/src/main.c`

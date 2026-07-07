@@ -34,5 +34,7 @@ radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_close(SbbEndpoint *endpoint);
 int sbb_endpoint_is_up(const SbbEndpoint *endpoint);
 const char *sbb_endpoint_state_name(int state);
+uint32_t sbb_endpoint_local_sender_id(const SbbEndpoint *endpoint);
+uint32_t sbb_endpoint_remote_receiver_id(const SbbEndpoint *endpoint);
 
 #endif

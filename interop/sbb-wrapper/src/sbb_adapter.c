@@ -58,6 +58,69 @@ static void clear_pending_slots(void)
     }
 }
 
+static uint16_t read_le_u16(const uint8_t *bytes)
+{
+    return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8));
+}
+
+static const char *sr_message_type_name(uint16_t message_type)
+{
+    switch (message_type) {
+    case 6200u:
+        return "ConnReq";
+    case 6201u:
+        return "ConnResp";
+    case 6212u:
+        return "RetrReq";
+    case 6213u:
+        return "RetrResp";
+    case 6216u:
+        return "DiscReq";
+    case 6220u:
+        return "Heartbeat";
+    case 6240u:
+        return "Data";
+    case 6241u:
+        return "RetrData";
+    default:
+        return "Unknown";
+    }
+}
+
+static void log_received_red_frame(uint32_t transport_channel_id, const uint8_t *bytes, uint16_t length)
+{
+    uint16_t red_length = 0u;
+    uint16_t sr_length = 0u;
+    uint16_t sr_type = 0u;
+    uint16_t i;
+    uint16_t prefix_len = length < 16u ? length : 16u;
+
+    if (!sbb_wrapper_udp_trace_enabled()) {
+        return;
+    }
+
+    if (length >= 2u) {
+        red_length = read_le_u16(bytes);
+    }
+    if (length >= (RADEF_RED_LAYER_MESSAGE_HEADER_SIZE + 4u)) {
+        sr_length = read_le_u16(&bytes[RADEF_RED_LAYER_MESSAGE_HEADER_SIZE]);
+        sr_type = read_le_u16(&bytes[RADEF_RED_LAYER_MESSAGE_HEADER_SIZE + 2u]);
+    }
+
+    printf(
+        "[sbb-wrapper] received RedL frame: transport=%u datagram_length=%u red_length=%u sr_length=%u sr_type=0x%04x(%s) prefix=",
+        transport_channel_id,
+        length,
+        red_length,
+        sr_length,
+        sr_type,
+        sr_message_type_name(sr_type));
+    for (i = 0u; i < prefix_len; i += 1u) {
+        printf("%02x", bytes[i]);
+    }
+    puts("");
+}
+
 void sradin_Init(void)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
@@ -264,6 +327,7 @@ int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id)
 
     slot->occupied = 1;
     slot->length = (uint16_t)received_length;
+    log_received_red_frame(transport_channel_id, slot->bytes, slot->length);
     printf(
         "[sbb-wrapper] transport poll: channel=%u received length=%u pending\n",
         transport_channel_id,
