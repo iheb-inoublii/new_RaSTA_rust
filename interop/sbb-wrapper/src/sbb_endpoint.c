@@ -257,6 +257,14 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
                 (unsigned int)opposite_buffer_size);
         }
         endpoint->last_state = state_value;
+        if (state_value == 4) {
+            endpoint->has_reached_up = 1;
+        } else if (state_value == 1 && endpoint->has_reached_up) {
+            endpoint->closed_after_up = 1;
+            if (endpoint->trace) {
+                puts("[sbb-wrapper] graceful close observed after Up; stopping SafRetL/RedL polling");
+            }
+        }
     }
 
     if (sbb_wrapper_diag_has_fatal()) {
@@ -360,6 +368,12 @@ radef_RaStaReturnCode sbb_endpoint_close(SbbEndpoint *endpoint)
     if (!endpoint->initialized) {
         return radef_kNotInitialized;
     }
+    if (endpoint->closed_after_up) {
+        if (endpoint->trace) {
+            puts("[sbb-wrapper] SafRetL close skipped because connection already closed after Up");
+        }
+        return radef_kNoError;
+    }
 
     sbb_wrapper_diag_set_phase("sbb_endpoint_close:srapi_CloseConnection");
     result = srapi_CloseConnection(endpoint->connection_id, 0U);
@@ -374,6 +388,11 @@ radef_RaStaReturnCode sbb_endpoint_close(SbbEndpoint *endpoint)
 int sbb_endpoint_is_up(const SbbEndpoint *endpoint)
 {
     return endpoint->last_state == 4;
+}
+
+int sbb_endpoint_is_closed_after_up(const SbbEndpoint *endpoint)
+{
+    return endpoint->closed_after_up;
 }
 
 uint32_t sbb_endpoint_local_sender_id(const SbbEndpoint *endpoint)

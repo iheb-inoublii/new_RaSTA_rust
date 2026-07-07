@@ -230,7 +230,7 @@ Verified Kali SafRetL run-loop result:
 - During SafRetL smoke, `sradin_SendMessage` sent lengths `50` and `40` with result `0`.
 - Passive single-process smoke reported `srapi_Init result=0`, stayed `Closed` because no active peer was running, and shut down cleanly.
 - Active single-process smoke reported `srapi_Init result=0` and `srapi_OpenConnection result=0`, sent length `58` and `48` frames, moved `Start` then `Closed` because no passive peer was running at the same time, and shut down cleanly.
-- Runtime log says Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed.
+- Runtime log now says Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed.
 
 ## Step 8H Receive Notification Path
 
@@ -324,14 +324,30 @@ Additional fix:
 - SafRetL notification logs include state names, disconnect reason values, and
   safety/address/type/SN/CSN diagnostic counters.
 
-Current Kali blocker:
+Current Kali result:
 
-- The passive process initializes, opens, transitions `NotInitialized -> Down`,
-  and repeatedly reports `srapi_CheckTimings result=0`,
-  `srapi_GetConnectionState state=Down`, and `srapi_ReadData result=1`.
-- The passive process later aborts with `IOT instruction` before reaching `Up`.
-- The likely immediate source is SBB calling the wrapper's `rasys_FatalError`
-  while handling an incoming frame or notification.
+- The SBB-to-SBB wrapper baseline reaches `Up`.
+- Passive logs `srapi_GetConnectionState: connection=0 result=0 state=Up`.
+- Passive receives a heartbeat frame with `sr_type=0x184c(Heartbeat)`.
+- Passive receives a disconnect request with `sr_type=0x1848(DiscReq)`.
+- Passive transitions to `Closed` through
+  `srnot_ConnectionStateNotification connection=0 state=1(Closed)`.
+- This proves the SBB-to-SBB baseline connection works.
+
+Post-disconnect fix:
+
+- The remaining issue was continued RedL/SafRetL polling after SBB had closed
+  the channel, which could trigger `rasys_FatalError` with
+  `InvalidParameter` or `InternalError` in
+  `sradin_ReadMessage:redint_ReadMessage`.
+- The wrapper now records that the endpoint reached `Up`, detects
+  `Closed` after `Up`, and treats that as graceful completion for the Step 8H
+  smoke test.
+- Once `Closed` after `Up` is observed, the run loop exits before calling
+  `srapi_ReadData`, before another poll cycle, and before any further
+  `sradin_ReadMessage` / `redint_ReadMessage` path.
+- `srapi_CloseConnection` is skipped if the connection already closed after
+  reaching `Up`.
 
 Fatal diagnostics added:
 
@@ -381,7 +397,7 @@ interoperability.
 The CLI runtime log now says:
 
 ```text
-Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed
+Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed
 ```
 
 ## CLI
@@ -403,10 +419,12 @@ Default port mapping:
 | active | channel 0 | `7100` | `7000` |
 | active | channel 1 | `7101` | `7001` |
 
-For now, the executable logs Step 8G SafRetL run-loop smoke status, prints
+For now, the executable logs Step 8H SBB-to-SBB baseline smoke status, prints
 settings, opens two nonblocking UDP sockets, initializes the RedL adapter and
 SafRetL, runs `srapi_CheckTimings`/state/read polling for `--run-seconds`, and
-closes sockets. Both roles call `srapi_OpenConnection`: active uses the client
+closes sockets. If the connection reaches `Up` and then transitions to
+`Closed`, the wrapper treats that as graceful smoke-test completion and stops
+polling. Both roles call `srapi_OpenConnection`: active uses the client
 ID ordering `0x61 -> 0x62` and passive uses the server/listening ID ordering
 `0x62 -> 0x61`. Startup logs print the selected connection ID, sender ID,
 receiver ID, network ID, and whether `srapi_OpenConnection` is called. Sample
@@ -452,8 +470,8 @@ The function signatures have been aligned to the SBB public headers. If the SBB
 checkout is not provided, the wrapper keeps fallback definitions for standalone
 smoke builds.
 
-## Remaining Work After Step 8G
+## Remaining Work After Step 8H
 
 - Keep the wrapper outside Rust protocol code.
-- Run the Step 8H SBB-to-SBB wrapper baseline in Kali.
-- Preserve the current no-interop claim until a real SBB connection is observed.
+- Verify in Kali that the post-disconnect polling fix prevents `rasys_FatalError` in the normal SBB-to-SBB baseline run.
+- Preserve the current no Rust-to-SBB interoperability claim.

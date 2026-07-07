@@ -150,21 +150,21 @@ SBB connection matching finding:
 
 Latest Kali result:
 
-- Passive starts as role `passive` with local sender `0x62` and remote receiver `0x61`.
-- `srapi_Init result=0`.
-- `srapi_OpenConnection result=0`.
-- State transitions `NotInitialized -> Down`.
-- Passive repeatedly logs `srapi_CheckTimings result=0`, `srapi_GetConnectionState state=Down`, and `srapi_ReadData result=1 length=0`.
-- Passive later exits with `IOT instruction`.
-- The likely immediate cause is SBB calling `rasys_FatalError` before the connection reaches `Up`.
+- The SBB-to-SBB wrapper baseline reaches `Up`.
+- Passive logs `srapi_GetConnectionState: connection=0 result=0 state=Up`.
+- Passive receives heartbeat frame `sr_type=0x184c(Heartbeat)`.
+- Passive receives disconnect request frame `sr_type=0x1848(DiscReq)`.
+- Passive transitions to `Closed` through `srnot_ConnectionStateNotification connection=0 state=1(Closed)`.
+- This proves the SBB-to-SBB baseline connection works.
 
-Diagnostic change for the next run:
+Post-disconnect fix:
 
-- `rasys_FatalError` now logs the numeric and symbolic fatal return code, role, connection ID, sender ID, receiver ID, and current wrapper phase before the default abort.
-- `--debug-no-abort` can be used only to capture full fatal diagnostics and exit cleanly after the current poll/read path.
-- Received datagram logs now include source endpoint, first bytes, RedL length, SafRetL length, and decoded SafRetL message type before RedL notification is invoked.
-
-Pending Kali validation after RedL-to-SafRetL notification bridge fix.
+- After the disconnect, the wrapper continued polling/reading RedL/SafRetL after SBB had closed the RedL channel.
+- That post-close read path could call `sradin_ReadMessage` / `redint_ReadMessage` and trigger `rasys_FatalError reason=6(InvalidParameter)` or `reason=16(InternalError)`.
+- The wrapper now records when the connection has reached `Up`.
+- If the state later becomes `Closed`, the run loop treats it as normal graceful completion for the SBB-to-SBB smoke test.
+- Once `Closed` after `Up` is observed, the wrapper stops before calling `srapi_ReadData`, before another poll cycle, and before any further `sradin_ReadMessage` / `redint_ReadMessage` path.
+- `debug_no_abort` remains diagnostic only; the normal run should not hit `rasys_FatalError`.
 
 ## Postconditions
 
@@ -188,6 +188,5 @@ Partially automated. Smoke tests are automated in CMake. The two-process baselin
 
 ## Open points
 
-- Verify whether the two-process baseline reaches `Up`.
-- If it does not reach `Up`, preserve logs and identify the next SBB return-code or state-machine blocker.
+- Verify in Kali that the post-disconnect polling fix prevents `rasys_FatalError` in the normal run.
 - Do not attempt Rust-to-SBB until SBB-to-SBB behavior is understood.

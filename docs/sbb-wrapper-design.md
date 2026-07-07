@@ -298,9 +298,9 @@ Implemented:
 - UDP receive data is stored in a fixed pending transport slot before RedL is notified with `redtrn_MessageReceivedNotification`.
 - Ping/Pong payload encoding and decoding using tag `0x03` / `0x04` plus little-endian `u32`.
 
-Stubbed:
+Not implemented:
 
-- Full SBB-to-SBB and Rust-to-SBB scenarios are not implemented yet.
+- Rust-to-SBB scenarios are not implemented yet.
 - No Rust `sbb-local` profile exists yet.
 - No Rust-to-SBB interoperability is claimed.
 
@@ -423,13 +423,15 @@ Smoke configuration comes from SBB test defaults:
 The CLI runtime banner is:
 
 ```text
-Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed
+Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed
 ```
 
 Active mode calls `srapi_OpenConnection`. Both active and passive modes poll
 `srapi_CheckTimings`, read state through `srapi_GetConnectionState`, call
-`srapi_ReadData`, and close via `srapi_CloseConnection`. Ping payloads are sent
-only after SafRetL reports `Up`.
+`srapi_ReadData`, and close via `srapi_CloseConnection` while the connection is
+open. If the connection reaches `Up` and later transitions to `Closed`, the
+Step 8H run loop treats that as graceful baseline completion and stops polling.
+Ping payloads are sent only after SafRetL reports `Up`.
 
 New smoke test:
 
@@ -517,14 +519,29 @@ Additional SafRetL diagnostics now log:
 - `srnot_ConnectionStateNotification` state names and disconnect values.
 - `srnot_SrDiagnosticNotification` safety, address, type, SN, and CSN counters.
 
-Current blocker from Kali:
+Current Kali result:
 
-- Passive initializes and opens with local sender `0x62`, remote receiver `0x61`.
-- Passive transitions `NotInitialized -> Down`.
-- Passive repeatedly logs successful timing checks, `state=Down`, and
-  `srapi_ReadData result=1` / no message.
-- Passive later aborts with `IOT instruction`.
-- The likely immediate cause is an SBB `rasys_FatalError` call.
+- The SBB-to-SBB wrapper baseline reaches `Up`.
+- Passive logs `srapi_GetConnectionState: connection=0 result=0 state=Up`.
+- Passive receives a heartbeat frame with `sr_type=0x184c(Heartbeat)`.
+- Passive receives a disconnect request with `sr_type=0x1848(DiscReq)`.
+- Passive transitions to `Closed` through
+  `srnot_ConnectionStateNotification connection=0 state=1(Closed)`.
+- This proves the SBB-to-SBB baseline connection works.
+
+Post-disconnect fix:
+
+- After the disconnect, continued RedL/SafRetL polling could call
+  `sradin_ReadMessage` / `redint_ReadMessage` after SBB closed the RedL channel,
+  producing `rasys_FatalError` with `InvalidParameter` or `InternalError`.
+- The wrapper now tracks whether the endpoint reached `Up`.
+- If the state later becomes `Closed`, the run loop treats it as normal
+  graceful completion for the Step 8H SBB-to-SBB smoke test.
+- After `Closed` after `Up`, the wrapper exits before calling
+  `srapi_ReadData`, before entering another poll cycle, and before any further
+  RedL read path.
+- `srapi_CloseConnection` is skipped if the connection already closed after
+  reaching `Up`.
 
 Fatal diagnostic changes:
 
@@ -579,10 +596,10 @@ Result:
 - `sradin_SendMessage` sent lengths `50` and `40` with result `0`.
 - Passive single-process smoke reported `srapi_Init result=0`, stayed `Closed` because no active peer was running, and shut down cleanly.
 - Active single-process smoke reported `srapi_Init result=0` and `srapi_OpenConnection result=0`, sent length `58` and `48` frames, moved `Start` then `Closed` because no passive peer was running at the same time, and shut down cleanly.
-- Runtime log says Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed.
+- Runtime log now says Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed.
 
-## Remaining Work After Step 8G
+## Remaining Work After Step 8H
 
-1. Run the corrected Step 8H SBB-to-SBB wrapper baseline in Kali and confirm packet direction is active `7100/7101` to passive `7000/7001`.
-2. Run Rust active to SBB passive with captured traces only after SBB-to-SBB is understood.
+1. Verify in Kali that the post-disconnect polling fix prevents `rasys_FatalError` in the normal SBB-to-SBB baseline run.
+2. Run Rust active to SBB passive with captured traces only after SBB-to-SBB cleanup is stable.
 3. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.

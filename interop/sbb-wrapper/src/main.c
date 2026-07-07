@@ -190,7 +190,7 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    puts("[sbb-wrapper] Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed");
+    puts("[sbb-wrapper] Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed");
     print_settings(&settings);
     sbb_wrapper_diag_set_debug_no_abort(settings.debug_no_abort);
 
@@ -238,6 +238,10 @@ int main(int argc, char **argv)
                 sbb_wrapper_rasta_return_code_name(result));
             break;
         }
+        if (sbb_endpoint_is_closed_after_up(&endpoint)) {
+            puts("[sbb-wrapper] connection closed after Up; graceful SBB-to-SBB smoke complete");
+            break;
+        }
 
         sbb_wrapper_diag_set_phase("main:read");
         result = sbb_endpoint_read(&endpoint);
@@ -277,7 +281,7 @@ int main(int argc, char **argv)
         printf("[sbb-wrapper] SafRetL close returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
     }
 
-    puts("[sbb-wrapper] exiting after SafRetL run-loop smoke");
+    puts("[sbb-wrapper] exiting after SBB-to-SBB baseline smoke");
     sbb_wrapper_udp_close();
     return 0;
 }

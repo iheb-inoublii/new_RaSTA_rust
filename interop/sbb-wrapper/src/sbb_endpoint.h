@@ -22,6 +22,8 @@ typedef struct SbbEndpoint {
     int open_requested;
     int trace;
     int last_state;
+    int has_reached_up;
+    int closed_after_up;
     uint32_t poll_count;
 } SbbEndpoint;
 
@@ -33,6 +35,7 @@ radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t cou
 radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_close(SbbEndpoint *endpoint);
 int sbb_endpoint_is_up(const SbbEndpoint *endpoint);
+int sbb_endpoint_is_closed_after_up(const SbbEndpoint *endpoint);
 const char *sbb_endpoint_state_name(int state);
 uint32_t sbb_endpoint_local_sender_id(const SbbEndpoint *endpoint);
 uint32_t sbb_endpoint_remote_receiver_id(const SbbEndpoint *endpoint);
