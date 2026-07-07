@@ -30,9 +30,19 @@ This profile is intended for Rust-to-Rust tests and examples only. It is not a p
 
 This profile is intended only for Rust-to-librasta local interoperability testing. Its no-checksum behavior is unsafe and is accepted only through an explicit interop/unsafe opt-in path.
 
-## Future sbb-local profile
+## sbb-local profile
 
-An SBB local profile is intentionally not encoded yet. The project needs evidence from the SBB implementation or test configuration before adding values. Until then, SBB work should reference the interoperability specs under `tests/specs/interoperability/` and record confirmed values before introducing `RastaProfile::sbb_local()`.
+`RastaProfile::sbb_local()` returns the Step 8I Rust-to-SBB preparation profile derived from the verified SBB wrapper baseline:
+
+- protocol version `0303`
+- lower MD4 safety code with the SBB-observed RFC MD4 initial value
+- redundancy CRC option A / no RedL check code
+- network identifier `123456`
+- `t_max_ms = 750`, `t_h_ms = 300`, `t_seq_ms = 50`
+- `n_send_max = 20`, `mwa = 10`
+- peer-relative timestamp compatibility
+
+This profile is opt-in only. It prepares Rust-to-SBB live testing against the SBB wrapper, but it is not itself a Rust-to-SBB interoperability success claim.
 
 ## Custom profile builder
 
@@ -54,7 +64,7 @@ Unsafe/no-checksum profiles must call `.allow_unsafe_no_checksums(true)` before 
 
 ## Unsafe/no-checksum opt-in
 
-Profiles with `SafetyCodeLength::None` or redundancy CRC option A do not provide the normal safety/checksum protection expected by the Rust default configuration. They are therefore rejected by the safe builder/validation path unless an explicit interop/unsafe opt-in is set. This keeps accidental unsafe profiles out of Rust-to-Rust tests while preserving known librasta interoperability behavior.
+Profiles with `SafetyCodeLength::None`, redundancy CRC option A, or an interoperability-only MD4 setup do not provide the normal protection expected by the Rust default configuration. They are therefore rejected by the safe builder/validation path unless an explicit interop/unsafe opt-in is set. This keeps accidental unsafe profiles out of Rust-to-Rust tests while preserving known librasta and SBB wrapper preparation behavior.
 
 ## Intended use
 
@@ -62,4 +72,4 @@ Profiles with `SafetyCodeLength::None` or redundancy CRC option A do not provide
 | --- | --- |
 | Rust-to-Rust | `RastaProfile::academic_default()` |
 | Rust-to-librasta | `RastaProfile::librasta_local()` |
-| Rust-to-SBB | Future `sbb-local`, values TBD from evidence |
+| Rust-to-SBB preparation | `RastaProfile::sbb_local()` |

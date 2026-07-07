@@ -8,7 +8,7 @@ The SBB RaSTA stack has a documented local baseline investigation in `docs/sbb-b
 
 No ready UDP client/server demo executable was found in the SBB build output. Only GoogleTest unit-test binaries were identified, so live Rust-to-SBB interoperability likely requires a small SBB adapter/wrapper executable that implements the SBB transport integration interfaces.
 
-Do not claim Rust-to-SBB interoperability yet. SBB configuration values are known from the investigation, but `RastaProfile::sbb_local()` should not be added until a runnable endpoint/wrapper provides live evidence.
+Do not claim Rust-to-SBB interoperability yet. Step 8H verified the SBB wrapper SBB-to-SBB baseline, and Step 8I adds an opt-in Rust `sbb-local` preparation profile and CLI selection only. The next evidence step is a live Rust active endpoint against an SBB passive wrapper.
 
 | Test area | What librasta/SBB-style tests usually cover | Current Rust coverage if known | Gap | Planned Rust test/spec file |
 | --- | --- | --- | --- | --- |
@@ -26,5 +26,6 @@ Do not claim Rust-to-SBB interoperability yet. SBB configuration values are know
 | Transport behavior | Transport trait send/receive errors | Mock transport tests | Keep transport refactor out of this phase | `tests/specs/unit/transport-trait-behavior.md` |
 | Rust-to-Rust | Handshake, data, ping-pong, disconnect | In-memory and app-level tests exist partially | Add ping-pong and use-case apps later | `tests/specs/integration/rust-to-rust-ping-pong.md` |
 | Rust-to-librasta | Handshake, data, heartbeat, ping-pong | Working local profile and 40-second result documented | Automate in CI or Docker later | `tests/specs/interoperability/rust-to-librasta-40-second-heartbeat.md` |
-| Rust-to-SBB | Build, baseline, handshake, ping-pong | SBB build/test baseline documented; no Rust-to-SBB interop yet | Need SBB wrapper endpoint and live trace evidence | `tests/specs/interoperability/sbb-build-and-baseline.md` |
+| Rust-to-SBB preparation | SBB profile matching, wire lengths, role/port mapping | `RastaProfile::sbb_local()`, `--profile sbb-local`, and ConnReq/Heartbeat/Disconnect RedL length tests | Need live Rust-to-SBB trace evidence | `tests/specs/interoperability/rust-to-sbb-preparation.md` |
+| Rust-to-SBB live tests | Handshake, heartbeat, data, ping-pong | SBB-to-SBB wrapper baseline reached Up and exchanged heartbeat; Rust-to-SBB not claimed | Run Rust active against SBB passive and compare traces | `tests/specs/interoperability/rust-to-sbb-handshake.md` |
 | Docker | Repeatable multi-process tests | Not implemented by request | Add later without changing transports now | `tests/specs/docker/docker-rust-to-rust.md` |

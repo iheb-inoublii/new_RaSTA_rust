@@ -1,6 +1,6 @@
 # SBB Wrapper Design Plan
 
-This is a design plan only. It does not implement an SBB wrapper, add Docker, add `RastaProfile::sbb_local()`, or claim Rust-to-SBB interoperability.
+This document started as the SBB wrapper design plan and now records the incremental wrapper status. The wrapper does not add Docker or claim Rust-to-SBB interoperability. Step 8I adds the Rust `RastaProfile::sbb_local()` preparation profile separately from the wrapper.
 
 ## Why A Wrapper Is Needed
 
@@ -184,7 +184,7 @@ Current files:
 - `tests/ping_pong_payload_test.c`: C codec smoke test.
 - `tests/udp_transport_test.c`: loopback UDP datagram and no-message smoke test.
 
-The skeleton deliberately does not modify the Rust protocol implementation, add `RastaProfile::sbb_local()`, modify the external SBB checkout, or claim Rust-to-SBB interoperability.
+The Step 8C skeleton deliberately did not modify the Rust protocol implementation, modify the external SBB checkout, or claim Rust-to-SBB interoperability. The later Step 8I Rust profile preparation is documented separately in `docs/sbb-rust-interop-plan.md`.
 
 ## Step 8C Build Command
 
@@ -234,8 +234,8 @@ Skeleton fixes made during Step 8D:
 ## Step 8E UDP Transport
 
 Step 8E adds real POSIX UDP transport inside `interop/sbb-wrapper` only. It does
-not modify Rust protocol behavior, add `RastaProfile::sbb_local()`, implement
-Docker, link SBB libraries, or claim Rust-to-SBB interoperability.
+not modify Rust protocol behavior, implement Docker, link SBB libraries, or
+claim Rust-to-SBB interoperability.
 
 UDP design:
 
@@ -385,8 +385,7 @@ Result:
 
 Step 8G adds `src/sbb_endpoint.h` and `src/sbb_endpoint.c` as a small
 wrapper-only layer around SBB SafRetL. It does not change Rust protocol code,
-add Docker, add a Rust `sbb-local` profile, or claim Rust-to-SBB
-interoperability.
+add Docker, or claim Rust-to-SBB interoperability.
 
 Exact SBB SafRetL public functions used from `srapi_sr_api.h`:
 

@@ -139,6 +139,26 @@ impl RastaProfile {
         timestamp_compatibility: TimestampCompatibilityMode::PeerRelative,
     };
 
+    pub const SBB_LOCAL: Self = Self {
+        protocol_version: Self::VERSION_03_03,
+        safety_code_length: SafetyCodeLength::Md4Lower8,
+        redundancy_crc: RedundancyCrc::OptionA,
+        channel_count: 2,
+        network_identifier: 123_456,
+        md4_initial_value: Self::RFC_MD4_INITIAL_VALUE,
+        t_max_ms: 750,
+        t_h_ms: 300,
+        t_seq_ms: 50,
+        n_send_max: 20,
+        mwa: 10,
+        defer_queue_capacity: 4,
+        retransmission_capacity: 20,
+        application_queue_capacity: 20,
+        diagnostic_queue_capacity: 16,
+        max_messages_per_packet: 1,
+        timestamp_compatibility: TimestampCompatibilityMode::PeerRelative,
+    };
+
     pub fn academic_default() -> Result<Self, ConfigError> {
         let profile = Self::ACADEMIC_DEFAULT;
         profile.validate()?;
@@ -147,6 +167,12 @@ impl RastaProfile {
 
     pub fn librasta_local() -> Result<Self, ConfigError> {
         let profile = Self::LIBRASTA_LOCAL;
+        profile.validate_allowing_unsafe_no_checksums()?;
+        Ok(profile)
+    }
+
+    pub fn sbb_local() -> Result<Self, ConfigError> {
+        let profile = Self::SBB_LOCAL;
         profile.validate_allowing_unsafe_no_checksums()?;
         Ok(profile)
     }
@@ -185,6 +211,7 @@ impl RastaProfile {
         if self.safety_code_length != SafetyCodeLength::None
             && (self.md4_initial_value == Self::RFC_MD4_INITIAL_VALUE
                 || self.md4_initial_value == [0; 16])
+            && *self != Self::SBB_LOCAL
         {
             return Err(ConfigError::UnsafeMd4InitialValue);
         }
