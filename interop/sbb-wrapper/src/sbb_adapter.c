@@ -33,6 +33,7 @@ static redcty_RedundancyLayerConfiguration g_redl_config = {
 
 #define SBB_WRAPPER_TRANSPORT_CHANNEL_COUNT 2u
 #define SBB_WRAPPER_REDUNDANCY_CHANNEL_COUNT 2u
+#define SBB_WRAPPER_SR_DISC_REQ 6216u
 
 typedef struct SbbWrapperPendingDatagram {
     int occupied;
@@ -43,6 +44,8 @@ typedef struct SbbWrapperPendingDatagram {
 static SbbWrapperPendingDatagram g_pending[SBB_WRAPPER_TRANSPORT_CHANNEL_COUNT];
 static int g_red_channel_open[SBB_WRAPPER_REDUNDANCY_CHANNEL_COUNT];
 static unsigned int g_red_read_allowed[SBB_WRAPPER_REDUNDANCY_CHANNEL_COUNT];
+static int g_disconnect_frame_in_progress = 0;
+static int g_disconnect_red_read_consumed = 0;
 static int g_redl_initialized = 0;
 
 static int valid_red_channel(uint32_t redundancy_channel_id)
@@ -74,12 +77,30 @@ static void clear_red_channel_state(void)
         g_red_channel_open[i] = 0;
         g_red_read_allowed[i] = 0u;
     }
+    g_disconnect_frame_in_progress = 0;
+    g_disconnect_red_read_consumed = 0;
 }
 
-void sbb_wrapper_redl_begin_message_notification(uint32_t redundancy_channel_id)
+int sbb_wrapper_redl_begin_message_notification(uint32_t redundancy_channel_id)
 {
     if (!valid_red_channel(redundancy_channel_id)) {
-        return;
+        return 0;
+    }
+    if (sbb_wrapper_diag_closed_after_up()) {
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] RedL read allowance skipped: channel=%u connection already closed after Up\n",
+                redundancy_channel_id);
+        }
+        return 0;
+    }
+    if (g_disconnect_frame_in_progress && g_disconnect_red_read_consumed) {
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] RedL read allowance skipped: channel=%u DiscReq read already consumed\n",
+                redundancy_channel_id);
+        }
+        return 0;
     }
     g_red_read_allowed[redundancy_channel_id] += 1u;
     if (sbb_wrapper_udp_trace_enabled()) {
@@ -88,6 +109,7 @@ void sbb_wrapper_redl_begin_message_notification(uint32_t redundancy_channel_id)
             redundancy_channel_id,
             g_red_read_allowed[redundancy_channel_id]);
     }
+    return 1;
 }
 
 void sbb_wrapper_redl_end_message_notification(uint32_t redundancy_channel_id)
@@ -104,6 +126,28 @@ void sbb_wrapper_redl_end_message_notification(uint32_t redundancy_channel_id)
 static uint16_t read_le_u16(const uint8_t *bytes)
 {
     return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8));
+}
+
+static uint16_t decode_sr_type(const uint8_t *bytes, uint16_t length)
+{
+    if (length < (RADEF_RED_LAYER_MESSAGE_HEADER_SIZE + 4u)) {
+        return 0u;
+    }
+    return read_le_u16(&bytes[RADEF_RED_LAYER_MESSAGE_HEADER_SIZE + 2u]);
+}
+
+static void note_received_sr_type(uint16_t sr_type)
+{
+    if (sr_type == SBB_WRAPPER_SR_DISC_REQ) {
+        g_disconnect_frame_in_progress = 1;
+        g_disconnect_red_read_consumed = 0;
+        if (sbb_wrapper_udp_trace_enabled()) {
+            puts("[sbb-wrapper] DiscReq detected; limiting RedL read handling for this notification");
+        }
+    } else if (!sbb_wrapper_diag_closed_after_up()) {
+        g_disconnect_frame_in_progress = 0;
+        g_disconnect_red_read_consumed = 0;
+    }
 }
 
 static const char *sr_message_type_name(uint16_t message_type)
@@ -147,7 +191,7 @@ static void log_received_red_frame(uint32_t transport_channel_id, const uint8_t 
     }
     if (length >= (RADEF_RED_LAYER_MESSAGE_HEADER_SIZE + 4u)) {
         sr_length = read_le_u16(&bytes[RADEF_RED_LAYER_MESSAGE_HEADER_SIZE]);
-        sr_type = read_le_u16(&bytes[RADEF_RED_LAYER_MESSAGE_HEADER_SIZE + 2u]);
+        sr_type = decode_sr_type(bytes, length);
     }
 
     printf(
@@ -289,6 +333,22 @@ radef_RaStaReturnCode sradin_ReadMessage(
             return radef_kNoMessageReceived;
         }
         g_red_read_allowed[redundancy_channel_id] -= 1u;
+        if (g_disconnect_frame_in_progress) {
+            if (g_disconnect_red_read_consumed) {
+                if (sbb_wrapper_udp_trace_enabled()) {
+                    printf(
+                        "[sbb-wrapper] sradin_ReadMessage: channel=%u skipped because DiscReq read was already consumed\n",
+                        redundancy_channel_id);
+                }
+                return radef_kNoMessageReceived;
+            }
+            g_disconnect_red_read_consumed = 1;
+            if (sbb_wrapper_udp_trace_enabled()) {
+                printf(
+                    "[sbb-wrapper] sradin_ReadMessage: channel=%u consuming one allowed DiscReq RedL read\n",
+                    redundancy_channel_id);
+            }
+        }
         sbb_wrapper_diag_set_phase("sradin_ReadMessage:redint_CheckTimings");
         radef_RaStaReturnCode timing_result = redint_CheckTimings();
         if (sbb_wrapper_diag_closed_after_up()) {
@@ -458,6 +518,7 @@ int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id)
     slot->occupied = 1;
     slot->length = (uint16_t)received_length;
     log_received_red_frame(transport_channel_id, slot->bytes, slot->length);
+    note_received_sr_type(decode_sr_type(slot->bytes, slot->length));
     printf(
         "[sbb-wrapper] transport poll: channel=%u received length=%u pending\n",
         transport_channel_id,
@@ -478,6 +539,9 @@ int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id)
     }
     sbb_wrapper_diag_set_phase("transport_poll:redtrn_MessageReceivedNotification");
     redtrn_MessageReceivedNotification(transport_channel_id);
+    if (g_disconnect_frame_in_progress && sbb_wrapper_diag_closed_after_up()) {
+        puts("[sbb-wrapper] RedL notification stopped safely because DiscReq closed the connection");
+    }
     printf(
         "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u invoked\n",
         transport_channel_id);

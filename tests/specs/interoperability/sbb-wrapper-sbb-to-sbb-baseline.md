@@ -183,6 +183,15 @@ Remaining Up-state fatal and fix:
 - Poll-style calls outside this notification flow return `radef_kNoMessageReceived`.
 - `sbb_adapter_bridge_test` now checks repeated no-pending `sradin_ReadMessage` calls return `NoMessageReceived`.
 
+DiscReq notification re-entrancy fix:
+
+- Kali showed the final normal-run abort happened while passive handled `sr_type=0x1848(DiscReq)`.
+- SBB closed RedL/SafRetL during that notification, but the same callback stack could still re-enter `sradin_ReadMessage` / `redint_ReadMessage`.
+- The wrapper now marks DiscReq before calling `redtrn_MessageReceivedNotification`.
+- During DiscReq notification handling, only the first valid `redint_ReadMessage` is allowed.
+- The DiscReq read is marked consumed before entering RedL so re-entrant reads return `radef_kNoMessageReceived`.
+- If `Closed after Up` is observed while forwarding `rednot_MessageReceivedNotification`, the wrapper stops the notification path safely and avoids further RedL/SafRetL calls.
+
 ## Postconditions
 
 - Rust protocol code remains unchanged.

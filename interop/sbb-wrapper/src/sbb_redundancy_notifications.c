@@ -14,9 +14,24 @@ void rednot_MessageReceivedNotification(const uint32_t red_channel_id)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     sbb_wrapper_diag_set_phase("rednot_MessageReceivedNotification:sradno_MessageReceivedNotification");
-    sbb_wrapper_redl_begin_message_notification(red_channel_id);
+    if (!sbb_wrapper_redl_begin_message_notification(red_channel_id)) {
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] rednot_MessageReceivedNotification: red_channel=%u stopped safely before SafRetL notification\n",
+                red_channel_id);
+        }
+        return;
+    }
     radef_RaStaReturnCode result = sradno_MessageReceivedNotification(red_channel_id);
     sbb_wrapper_redl_end_message_notification(red_channel_id);
+    if (sbb_wrapper_diag_closed_after_up()) {
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] rednot_MessageReceivedNotification: red_channel=%u stopped safely because disconnect closed the connection\n",
+                red_channel_id);
+        }
+        return;
+    }
     if (sbb_wrapper_udp_trace_enabled()) {
         printf(
             "[sbb-wrapper] rednot_MessageReceivedNotification: red_channel=%u sradno_result=%u(%s)\n",

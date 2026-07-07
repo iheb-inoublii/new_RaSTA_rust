@@ -569,6 +569,21 @@ Remaining Up-state fatal and fix:
   present.
 - Polling calls outside this flow return `radef_kNoMessageReceived`.
 
+DiscReq notification re-entrancy fix:
+
+- The final passive abort happened during handling of
+  `sr_type=0x1848(DiscReq)`.
+- SBB closed RedL/SafRetL during the notification, then the same callback stack
+  could re-enter `sradin_ReadMessage` / `redint_ReadMessage`.
+- The wrapper now detects DiscReq before `redtrn_MessageReceivedNotification`.
+- During a DiscReq notification, only the first valid `redint_ReadMessage` is
+  allowed, and that read is marked consumed before entering RedL.
+- Re-entrant `sradin_ReadMessage` calls during the same DiscReq notification
+  return `radef_kNoMessageReceived`.
+- If `Closed after Up` is observed while forwarding
+  `rednot_MessageReceivedNotification`, the wrapper stops the notification path
+  without further RedL/SafRetL operations.
+
 Fatal diagnostic changes:
 
 - `rasys_FatalError` logs `SBB rasys_FatalError called` before aborting.

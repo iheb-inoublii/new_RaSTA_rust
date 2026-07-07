@@ -376,6 +376,23 @@ Remaining Up-state fatal and fix:
 - Poll-style SafRetL calls to `sradin_ReadMessage` outside that notification
   path return `radef_kNoMessageReceived` without touching RedL.
 
+DiscReq notification re-entrancy fix:
+
+- Kali then showed the final normal-run abort happened while passive handled
+  `sr_type=0x1848(DiscReq)`.
+- SBB closed RedL/SafRetL during that notification, but the same callback stack
+  could still re-enter `sradin_ReadMessage` / `redint_ReadMessage`.
+- The wrapper now marks `DiscReq` before calling
+  `redtrn_MessageReceivedNotification`.
+- During a DiscReq notification, only the first valid `redint_ReadMessage` is
+  allowed; the read is marked consumed before entering RedL so re-entrant reads
+  return `radef_kNoMessageReceived`.
+- If `Closed after Up` is observed while forwarding
+  `rednot_MessageReceivedNotification`, the wrapper stops the notification path
+  safely and does not call further RedL/SafRetL operations.
+- Expected normal-run Step 8H result remains `Up`, heartbeat,
+  `DiscReq`/`Closed`, graceful smoke completion, and no `rasys_FatalError`.
+
 Fatal diagnostics added:
 
 - `rasys_FatalError` now logs `SBB rasys_FatalError called` before aborting.
