@@ -32,6 +32,7 @@ static redcty_RedundancyLayerConfiguration g_redl_config = {
 #endif
 
 #define SBB_WRAPPER_TRANSPORT_CHANNEL_COUNT 2u
+#define SBB_WRAPPER_REDUNDANCY_CHANNEL_COUNT 2u
 
 typedef struct SbbWrapperPendingDatagram {
     int occupied;
@@ -40,7 +41,14 @@ typedef struct SbbWrapperPendingDatagram {
 } SbbWrapperPendingDatagram;
 
 static SbbWrapperPendingDatagram g_pending[SBB_WRAPPER_TRANSPORT_CHANNEL_COUNT];
+static int g_red_channel_open[SBB_WRAPPER_REDUNDANCY_CHANNEL_COUNT];
+static unsigned int g_red_read_allowed[SBB_WRAPPER_REDUNDANCY_CHANNEL_COUNT];
 static int g_redl_initialized = 0;
+
+static int valid_red_channel(uint32_t redundancy_channel_id)
+{
+    return redundancy_channel_id < SBB_WRAPPER_REDUNDANCY_CHANNEL_COUNT;
+}
 
 static SbbWrapperPendingDatagram *pending_slot(uint32_t transport_channel_id)
 {
@@ -56,6 +64,40 @@ static void clear_pending_slots(void)
     for (i = 0u; i < SBB_WRAPPER_TRANSPORT_CHANNEL_COUNT; i += 1u) {
         g_pending[i].occupied = 0;
         g_pending[i].length = 0u;
+    }
+}
+
+static void clear_red_channel_state(void)
+{
+    uint32_t i;
+    for (i = 0u; i < SBB_WRAPPER_REDUNDANCY_CHANNEL_COUNT; i += 1u) {
+        g_red_channel_open[i] = 0;
+        g_red_read_allowed[i] = 0u;
+    }
+}
+
+void sbb_wrapper_redl_begin_message_notification(uint32_t redundancy_channel_id)
+{
+    if (!valid_red_channel(redundancy_channel_id)) {
+        return;
+    }
+    g_red_read_allowed[redundancy_channel_id] += 1u;
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] RedL read allowance begin: channel=%u allowance=%u\n",
+            redundancy_channel_id,
+            g_red_read_allowed[redundancy_channel_id]);
+    }
+}
+
+void sbb_wrapper_redl_end_message_notification(uint32_t redundancy_channel_id)
+{
+    if (!valid_red_channel(redundancy_channel_id)) {
+        return;
+    }
+    g_red_read_allowed[redundancy_channel_id] = 0u;
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf("[sbb-wrapper] RedL read allowance end: channel=%u\n", redundancy_channel_id);
     }
 }
 
@@ -129,12 +171,14 @@ void sradin_Init(void)
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result = redint_Init(&g_redl_config);
     g_redl_initialized = (result == radef_kNoError || result == radef_kAlreadyInitialized);
+    clear_red_channel_state();
     printf(
         "[sbb-wrapper] sradin_Init: redint_Init result=%u(%s)\n",
         (unsigned int)result,
         sbb_wrapper_rasta_return_code_name(result));
 #else
     g_redl_initialized = 0;
+    clear_red_channel_state();
     puts("[sbb-wrapper] sradin_Init: SBB RedL not linked");
 #endif
 }
@@ -143,6 +187,11 @@ void sradin_OpenRedundancyChannel(uint32_t redundancy_channel_id)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result = redint_OpenRedundancyChannel(redundancy_channel_id);
+    if (result == radef_kNoError || result == radef_kAlreadyInitialized) {
+        if (valid_red_channel(redundancy_channel_id)) {
+            g_red_channel_open[redundancy_channel_id] = 1;
+        }
+    }
     printf(
         "[sbb-wrapper] sradin_OpenRedundancyChannel: channel=%u result=%u(%s)\n",
         redundancy_channel_id,
@@ -157,6 +206,10 @@ void sradin_CloseRedundancyChannel(uint32_t redundancy_channel_id)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result = redint_CloseRedundancyChannel(redundancy_channel_id);
+    if (valid_red_channel(redundancy_channel_id)) {
+        g_red_channel_open[redundancy_channel_id] = 0;
+        g_red_read_allowed[redundancy_channel_id] = 0u;
+    }
     printf(
         "[sbb-wrapper] sradin_CloseRedundancyChannel: channel=%u result=%u(%s)\n",
         redundancy_channel_id,
@@ -205,6 +258,20 @@ radef_RaStaReturnCode sradin_ReadMessage(
 
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     {
+        if (!valid_red_channel(redundancy_channel_id)) {
+            printf(
+                "[sbb-wrapper] sradin_ReadMessage: channel=%u skipped because redundancy channel is invalid\n",
+                redundancy_channel_id);
+            return radef_kNoMessageReceived;
+        }
+        if (!g_red_channel_open[redundancy_channel_id]) {
+            if (sbb_wrapper_udp_trace_enabled()) {
+                printf(
+                    "[sbb-wrapper] sradin_ReadMessage: channel=%u skipped because RedL channel is not open\n",
+                    redundancy_channel_id);
+            }
+            return radef_kNoMessageReceived;
+        }
         if (sbb_wrapper_diag_closed_after_up()) {
             if (sbb_wrapper_udp_trace_enabled()) {
                 printf(
@@ -213,6 +280,15 @@ radef_RaStaReturnCode sradin_ReadMessage(
             }
             return radef_kNoMessageReceived;
         }
+        if (g_red_read_allowed[redundancy_channel_id] == 0u) {
+            if (sbb_wrapper_udp_trace_enabled()) {
+                printf(
+                    "[sbb-wrapper] sradin_ReadMessage: channel=%u skipped because no RedL message notification is active\n",
+                    redundancy_channel_id);
+            }
+            return radef_kNoMessageReceived;
+        }
+        g_red_read_allowed[redundancy_channel_id] -= 1u;
         sbb_wrapper_diag_set_phase("sradin_ReadMessage:redint_CheckTimings");
         radef_RaStaReturnCode timing_result = redint_CheckTimings();
         if (sbb_wrapper_diag_closed_after_up()) {
@@ -224,6 +300,12 @@ radef_RaStaReturnCode sradin_ReadMessage(
             return radef_kNoMessageReceived;
         }
         sbb_wrapper_diag_set_phase("sradin_ReadMessage:redint_ReadMessage");
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] sradin_ReadMessage: channel=%u calling redint_ReadMessage allowance_remaining=%u\n",
+                redundancy_channel_id,
+                g_red_read_allowed[redundancy_channel_id]);
+        }
         radef_RaStaReturnCode read_result = redint_ReadMessage(redundancy_channel_id, buffer_size, message_size, message_buffer);
         printf(
             "[sbb-wrapper] sradin_ReadMessage: channel=%u timing_result=%u(%s) read_result=%u(%s) length=%u\n",
@@ -251,6 +333,7 @@ void redtri_Init(void)
     }
 
     clear_pending_slots();
+    clear_red_channel_state();
     g_redl_initialized = 0;
     puts("[sbb-wrapper] redtri_Init: UDP transport ready");
 }

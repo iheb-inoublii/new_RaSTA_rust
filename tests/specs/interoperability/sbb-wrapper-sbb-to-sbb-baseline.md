@@ -172,6 +172,17 @@ Post-disconnect fix:
 - `debug_no_abort` remains diagnostic only; the normal run should not hit `rasys_FatalError`.
 - Step 8H success condition is `Up`, heartbeat, `DiscReq`/`Closed`, and no `rasys_FatalError` in the normal run.
 
+Remaining Up-state fatal and fix:
+
+- Kali showed passive could still call `rasys_FatalError reason=6(InvalidParameter)` while still `Up`, before the later `DiscReq`.
+- The fatal phase was `sradin_ReadMessage:redint_ReadMessage`.
+- The likely cause was `sradin_ReadMessage` entering `redint_ReadMessage` even when no RedL upper-layer message notification was active.
+- The wrapper now tracks RedL channel-open state and a one-shot RedL read allowance per redundancy channel.
+- `rednot_MessageReceivedNotification` grants the allowance while forwarding to `sradno_MessageReceivedNotification`.
+- `sradin_ReadMessage` calls `redint_ReadMessage` only when the channel is open, the connection is not closed after `Up`, and a RedL message notification is currently active.
+- Poll-style calls outside this notification flow return `radef_kNoMessageReceived`.
+- `sbb_adapter_bridge_test` now checks repeated no-pending `sradin_ReadMessage` calls return `NoMessageReceived`.
+
 ## Postconditions
 
 - Rust protocol code remains unchanged.
@@ -185,6 +196,8 @@ Post-disconnect fix:
 - `interop/sbb-wrapper/src/sbb_redundancy_notifications.c`
 - `interop/sbb-wrapper/src/sbb_safety_notifications.c`
 - `interop/sbb-wrapper/src/sbb_endpoint.c`
+- `interop/sbb-wrapper/src/sbb_redundancy_notifications.c`
+- `interop/sbb-wrapper/tests/sbb_adapter_bridge_test.c`
 - `interop/sbb-wrapper/tests/sbb_transport_notification_test.c`
 - `interop/sbb-wrapper/src/main.c`
 

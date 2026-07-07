@@ -553,6 +553,22 @@ Post-disconnect fix:
 - Step 8H success condition is `Up`, heartbeat, `DiscReq`/`Closed`, and no
   `rasys_FatalError` in the normal run.
 
+Remaining Up-state fatal and fix:
+
+- Kali showed passive could still call `rasys_FatalError
+  reason=6(InvalidParameter)` while still `Up`, before the later `DiscReq`.
+- The fatal phase was `sradin_ReadMessage:redint_ReadMessage`.
+- This indicated the wrapper was allowing `sradin_ReadMessage` to enter RedL
+  when no RedL upper-layer message notification was active.
+- The wrapper now tracks whether each RedL channel is open and whether a
+  one-shot RedL read is currently allowed.
+- `rednot_MessageReceivedNotification` grants that one-shot allowance while it
+  forwards to `sradno_MessageReceivedNotification`.
+- `sradin_ReadMessage` only calls `redint_ReadMessage` when the channel is open,
+  the connection is not closed after `Up`, and that notification allowance is
+  present.
+- Polling calls outside this flow return `radef_kNoMessageReceived`.
+
 Fatal diagnostic changes:
 
 - `rasys_FatalError` logs `SBB rasys_FatalError called` before aborting.
