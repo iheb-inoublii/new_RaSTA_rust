@@ -1,4 +1,5 @@
 #include "udp_transport.h"
+#include "sbb_diagnostics.h"
 
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
 #include "rasta_redundancy/rednot_red_notifications.h"
@@ -12,12 +13,14 @@
 void rednot_MessageReceivedNotification(const uint32_t red_channel_id)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
+    sbb_wrapper_diag_set_phase("rednot_MessageReceivedNotification:sradno_MessageReceivedNotification");
     radef_RaStaReturnCode result = sradno_MessageReceivedNotification(red_channel_id);
     if (sbb_wrapper_udp_trace_enabled()) {
         printf(
-            "[sbb-wrapper] rednot_MessageReceivedNotification: red_channel=%u sradno_result=%u\n",
+            "[sbb-wrapper] rednot_MessageReceivedNotification: red_channel=%u sradno_result=%u(%s)\n",
             red_channel_id,
-            result);
+            (unsigned int)result,
+            sbb_wrapper_rasta_return_code_name(result));
     }
 #else
     if (sbb_wrapper_udp_trace_enabled()) {
@@ -32,20 +35,22 @@ void rednot_DiagnosticNotification(
     const radef_TransportChannelDiagnosticData transport_channel_diagnostic_data)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
+    sbb_wrapper_diag_set_phase("rednot_DiagnosticNotification:sradno_DiagnosticNotification");
     radef_RaStaReturnCode result = sradno_DiagnosticNotification(
         red_channel_id,
         tr_channel_id,
         transport_channel_diagnostic_data);
     if (sbb_wrapper_udp_trace_enabled()) {
         printf(
-            "[sbb-wrapper] rednot_DiagnosticNotification: red_channel=%u transport=%u n_diagnosis=%u n_missed=%u t_drift=%u t_drift2=%u sradno_result=%u\n",
+            "[sbb-wrapper] rednot_DiagnosticNotification: red_channel=%u transport=%u n_diagnosis=%u n_missed=%u t_drift=%u t_drift2=%u sradno_result=%u(%s)\n",
             red_channel_id,
             tr_channel_id,
             transport_channel_diagnostic_data.n_diagnosis,
             transport_channel_diagnostic_data.n_missed,
             transport_channel_diagnostic_data.t_drift,
             transport_channel_diagnostic_data.t_drift2,
-            result);
+            (unsigned int)result,
+            sbb_wrapper_rasta_return_code_name(result));
     }
 #else
     if (sbb_wrapper_udp_trace_enabled()) {

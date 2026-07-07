@@ -28,6 +28,7 @@ endif()
 add_library(sbb_wrapper_common OBJECT
     src/ping_pong_payload.c
     src/sbb_adapter.c
+    src/sbb_diagnostics.c
     src/sbb_endpoint.c
     src/sbb_redundancy_notifications.c
     src/sbb_safety_notifications.c

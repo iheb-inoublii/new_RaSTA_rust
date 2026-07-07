@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "sbb_diagnostics.h"
+
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
 #include "rasta_common/rasys_rasta_system_adapter.h"
 #else
@@ -32,6 +34,22 @@ uint32_t rasys_GetRandomNumber(void)
 
 void rasys_FatalError(const radef_RaStaReturnCode error_reason)
 {
-    fprintf(stderr, "[sbb-wrapper] rasys_FatalError: reason=%u\n", error_reason);
+    sbb_wrapper_diag_record_fatal(error_reason);
+    fprintf(
+        stderr,
+        "[sbb-wrapper] SBB rasys_FatalError called: reason=%u(%s) role=%s connection_id=%u sender_id=0x%02x receiver_id=0x%02x phase=%s debug_no_abort=%s\n",
+        (unsigned int)error_reason,
+        sbb_wrapper_rasta_return_code_name(error_reason),
+        sbb_wrapper_diag_role(),
+        (unsigned int)sbb_wrapper_diag_connection_id(),
+        (unsigned int)sbb_wrapper_diag_sender_id(),
+        (unsigned int)sbb_wrapper_diag_receiver_id(),
+        sbb_wrapper_diag_phase(),
+        sbb_wrapper_diag_debug_no_abort() ? "true" : "false");
+    fflush(stdout);
+    fflush(stderr);
+    if (sbb_wrapper_diag_debug_no_abort()) {
+        return;
+    }
     abort();
 }

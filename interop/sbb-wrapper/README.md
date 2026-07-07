@@ -324,6 +324,29 @@ Additional fix:
 - SafRetL notification logs include state names, disconnect reason values, and
   safety/address/type/SN/CSN diagnostic counters.
 
+Current Kali blocker:
+
+- The passive process initializes, opens, transitions `NotInitialized -> Down`,
+  and repeatedly reports `srapi_CheckTimings result=0`,
+  `srapi_GetConnectionState state=Down`, and `srapi_ReadData result=1`.
+- The passive process later aborts with `IOT instruction` before reaching `Up`.
+- The likely immediate source is SBB calling the wrapper's `rasys_FatalError`
+  while handling an incoming frame or notification.
+
+Fatal diagnostics added:
+
+- `rasys_FatalError` now logs `SBB rasys_FatalError called` before aborting.
+- The fatal log includes numeric and symbolic return code, role, connection ID,
+  sender ID, receiver ID, current wrapper phase, and whether diagnostic
+  no-abort mode is enabled.
+- stdout and stderr are flushed before the default abort.
+- `--debug-no-abort` records the fatal and lets the wrapper exit after the
+  current poll/read path. This is diagnostic only and must not be used to claim
+  success.
+- received datagram logs now include source endpoint, first bytes, RedL length,
+  SafRetL length, and decoded SafRetL message type before
+  `redtrn_MessageReceivedNotification` is called.
+
 New transport notification smoke test:
 
 ```sh
@@ -337,6 +360,17 @@ rm -f /tmp/sbb-passive.log /tmp/sbb-active.log
 ./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-passive.log 2>&1 &
 sleep 1
 ./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace --run-seconds 30 > /tmp/sbb-active.log 2>&1
+cat /tmp/sbb-passive.log
+cat /tmp/sbb-active.log
+```
+
+Diagnostic no-abort variant:
+
+```sh
+rm -f /tmp/sbb-passive.log /tmp/sbb-active.log
+./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --debug-no-abort --run-seconds 30 > /tmp/sbb-passive.log 2>&1 &
+sleep 1
+./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace --debug-no-abort --run-seconds 30 > /tmp/sbb-active.log 2>&1
 cat /tmp/sbb-passive.log
 cat /tmp/sbb-active.log
 ```
@@ -356,6 +390,9 @@ Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed
 interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 10 --run-seconds 40 --trace
 interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --channel0-local 7100 --channel0-remote 7000
 ```
+
+Use `--debug-no-abort` only for diagnosing an SBB `rasys_FatalError`; default
+behavior still aborts to preserve SBB safety semantics.
 
 Default port mapping:
 

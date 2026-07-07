@@ -68,6 +68,17 @@ cat /tmp/sbb-passive.log
 cat /tmp/sbb-active.log
 ```
 
+Optional diagnostic no-abort run if SBB calls `rasys_FatalError`:
+
+```sh
+rm -f /tmp/sbb-passive.log /tmp/sbb-active.log
+./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 3 --trace --debug-no-abort --run-seconds 30 > /tmp/sbb-passive.log 2>&1 &
+sleep 1
+./interop/sbb-wrapper/build/sbb-rasta-wrapper active 127.0.0.1 --rounds 3 --trace --debug-no-abort --run-seconds 30 > /tmp/sbb-active.log 2>&1
+cat /tmp/sbb-passive.log
+cat /tmp/sbb-active.log
+```
+
 ## Expected result
 
 - Passive logs UDP receive activity.
@@ -136,6 +147,22 @@ SBB connection matching finding:
 - Additional trace logging now records RedL/SafRetL frame lengths, SafRetL message type when identifiable from fixed offsets, `sradno_*` return codes, and SafRetL diagnostic counters.
 - Additional endpoint trace logging records `srapi_OpenConnection` arguments and returned connection ID, every `srapi_CheckTimings` result, every `srapi_GetConnectionState` result, and every `srapi_ReadData` result.
 - Safety notification trace logging records state names, disconnect reason values, and diagnostic counter values for safety, address, type, SN, and CSN errors.
+
+Latest Kali result:
+
+- Passive starts as role `passive` with local sender `0x62` and remote receiver `0x61`.
+- `srapi_Init result=0`.
+- `srapi_OpenConnection result=0`.
+- State transitions `NotInitialized -> Down`.
+- Passive repeatedly logs `srapi_CheckTimings result=0`, `srapi_GetConnectionState state=Down`, and `srapi_ReadData result=1 length=0`.
+- Passive later exits with `IOT instruction`.
+- The likely immediate cause is SBB calling `rasys_FatalError` before the connection reaches `Up`.
+
+Diagnostic change for the next run:
+
+- `rasys_FatalError` now logs the numeric and symbolic fatal return code, role, connection ID, sender ID, receiver ID, and current wrapper phase before the default abort.
+- `--debug-no-abort` can be used only to capture full fatal diagnostics and exit cleanly after the current poll/read path.
+- Received datagram logs now include source endpoint, first bytes, RedL length, SafRetL length, and decoded SafRetL message type before RedL notification is invoked.
 
 Pending Kali validation after RedL-to-SafRetL notification bridge fix.
 

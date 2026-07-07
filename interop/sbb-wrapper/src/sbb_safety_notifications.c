@@ -1,4 +1,5 @@
 #include "udp_transport.h"
+#include "sbb_diagnostics.h"
 
 #include <stdio.h>
 
@@ -26,44 +27,6 @@ typedef struct {
 } sraty_RedundancyChannelDiagnosticData;
 #endif
 
-static const char *connection_state_name(int state)
-{
-    switch (state) {
-    case 0:
-        return "NotInitialized";
-    case 1:
-        return "Closed";
-    case 2:
-        return "Down";
-    case 3:
-        return "Start";
-    case 4:
-        return "Up";
-    case 5:
-        return "RetransRequest";
-    case 6:
-        return "RetransRunning";
-    default:
-        return "Unknown";
-    }
-}
-
-static const char *disconnect_reason_name(int reason)
-{
-    switch (reason) {
-    case 0:
-        return "None";
-    case 1:
-        return "Regular";
-    case 2:
-        return "Timeout";
-    case 3:
-        return "ProtocolError";
-    default:
-        return "Unknown";
-    }
-}
-
 void srnot_MessageReceivedNotification(const uint32_t connection_id)
 {
     if (sbb_wrapper_udp_trace_enabled()) {
@@ -84,12 +47,12 @@ void srnot_ConnectionStateNotification(
             "[sbb-wrapper] srnot_ConnectionStateNotification connection=%u state=%d(%s) send_used=%u recv_used=%u opposite_buffer=%u disconnect=%d(%s) detailed=%u\n",
             (unsigned int)connection_id,
             (int)connection_state,
-            connection_state_name((int)connection_state),
+            sbb_wrapper_connection_state_name((int)connection_state),
             (unsigned int)buffer_utilisation.send_buffer_used,
             (unsigned int)buffer_utilisation.receive_buffer_used,
             (unsigned int)opposite_buffer_size,
             (int)disconnect_reason,
-            disconnect_reason_name((int)disconnect_reason),
+            sbb_wrapper_disconnect_reason_name((int)disconnect_reason),
             (unsigned int)detailed_disconnect_reason);
     }
 }

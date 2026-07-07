@@ -64,7 +64,7 @@ Run wrapper CLI smoke tests:
 - `redint_ReadMessage`
 - `redint_CheckTimings`
 
-The SBB transport notification function `redtrn_MessageReceivedNotification` was inspected. The wrapper currently uses `redint_CheckTimings` for RedL polling before reads.
+The SBB transport notification function `redtrn_MessageReceivedNotification` was inspected. Step 8F used `redint_CheckTimings` for the first RedL smoke path; Step 8H supersedes this with UDP polling, fixed pending transport slots, and RedL transport notification.
 
 ## Current status
 

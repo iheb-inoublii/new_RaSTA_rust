@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include "sbb_diagnostics.h"
 #include "sbb_endpoint.h"
 #include "udp_transport.h"
 
@@ -20,6 +21,7 @@ typedef struct WrapperSettings {
     unsigned int rounds;
     unsigned int run_seconds;
     int trace;
+    int debug_no_abort;
     SbbWrapperUdpConfig udp;
 } WrapperSettings;
 
@@ -31,6 +33,7 @@ static void print_usage(const char *program)
     puts("  --rounds <N>");
     puts("  --run-seconds <N>");
     puts("  --trace");
+    puts("  --debug-no-abort");
     puts("  --channel0-local <PORT>");
     puts("  --channel0-remote <PORT>");
     puts("  --channel1-local <PORT>");
@@ -103,6 +106,9 @@ static int parse_settings(int argc, char **argv, WrapperSettings *settings)
             settings->trace = 1;
             settings->udp.trace = 1;
             i += 1;
+        } else if (strcmp(argv[i], "--debug-no-abort") == 0) {
+            settings->debug_no_abort = 1;
+            i += 1;
         } else if (strcmp(argv[i], "--rounds") == 0 && i + 1 < argc) {
             if (parse_uint(argv[i + 1], &settings->rounds) != 0) {
                 return -1;
@@ -147,6 +153,7 @@ static void print_settings(const WrapperSettings *settings)
     printf("[sbb-wrapper] rounds=%u\n", settings->rounds);
     printf("[sbb-wrapper] run_seconds=%u\n", settings->run_seconds);
     printf("[sbb-wrapper] trace=%s\n", settings->trace ? "true" : "false");
+    printf("[sbb-wrapper] debug_no_abort=%s\n", settings->debug_no_abort ? "true" : "false");
     sbb_wrapper_udp_print_config(&settings->udp);
 }
 
@@ -185,60 +192,89 @@ int main(int argc, char **argv)
 
     puts("[sbb-wrapper] Step 8G SBB SafRetL run-loop smoke only; no Rust-to-SBB interop is claimed");
     print_settings(&settings);
+    sbb_wrapper_diag_set_debug_no_abort(settings.debug_no_abort);
 
+    sbb_wrapper_diag_set_phase("main:udp_init");
     if (sbb_wrapper_udp_init(&settings.udp) != 0) {
         return 1;
     }
 
+    sbb_wrapper_diag_set_phase("main:redtri_Init");
     redtri_Init();
     sbb_endpoint_configure(
         &endpoint,
         settings.role == WRAPPER_ROLE_ACTIVE ? SBB_ENDPOINT_ROLE_ACTIVE : SBB_ENDPOINT_ROLE_PASSIVE,
         settings.trace);
 
+    sbb_wrapper_diag_set_phase("main:sbb_endpoint_init");
     result = sbb_endpoint_init(&endpoint);
     if (result != radef_kNoError) {
-        printf("[sbb-wrapper] SafRetL init failed result=%d\n", result);
+        printf("[sbb-wrapper] SafRetL init failed result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
         sbb_wrapper_udp_close();
         return 1;
     }
 
+    sbb_wrapper_diag_set_phase("main:sbb_endpoint_open");
     result = sbb_endpoint_open(&endpoint);
     if (result != radef_kNoError) {
-        printf("[sbb-wrapper] SafRetL open failed result=%d\n", result);
+        printf("[sbb-wrapper] SafRetL open failed result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
         sbb_wrapper_udp_close();
         return 1;
     }
 
     end_time = monotonic_millis() + (settings.run_seconds * 1000u);
     while ((int32_t)(end_time - monotonic_millis()) > 0) {
+        sbb_wrapper_diag_set_phase("main:poll");
         result = sbb_endpoint_poll(&endpoint);
         if (result != radef_kNoError) {
-            printf("[sbb-wrapper] SafRetL poll returned result=%d\n", result);
+            printf("[sbb-wrapper] SafRetL poll returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+            break;
+        }
+        if (sbb_wrapper_diag_has_fatal()) {
+            result = sbb_wrapper_diag_fatal_reason();
+            printf(
+                "[sbb-wrapper] recorded fatal after poll result=%d(%s); exiting diagnostic run\n",
+                result,
+                sbb_wrapper_rasta_return_code_name(result));
             break;
         }
 
+        sbb_wrapper_diag_set_phase("main:read");
         result = sbb_endpoint_read(&endpoint);
         if (result != radef_kNoError && result != radef_kNoMessageReceived) {
-            printf("[sbb-wrapper] SafRetL read returned result=%d\n", result);
+            printf("[sbb-wrapper] SafRetL read returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+        }
+        if (sbb_wrapper_diag_has_fatal()) {
+            result = sbb_wrapper_diag_fatal_reason();
+            printf(
+                "[sbb-wrapper] recorded fatal after read result=%d(%s); exiting diagnostic run\n",
+                result,
+                sbb_wrapper_rasta_return_code_name(result));
+            break;
         }
 
         if (settings.role == WRAPPER_ROLE_ACTIVE && sbb_endpoint_is_up(&endpoint) && next_ping <= settings.rounds) {
+            sbb_wrapper_diag_set_phase("main:send_ping");
             result = sbb_endpoint_send_ping(&endpoint, next_ping);
             if (result == radef_kNoError) {
                 printf("[sbb-wrapper] sent Ping(%u)\n", next_ping);
                 next_ping += 1u;
             } else if (settings.trace) {
-                printf("[sbb-wrapper] Ping(%u) not sent result=%d\n", next_ping, result);
+                printf(
+                    "[sbb-wrapper] Ping(%u) not sent result=%d(%s)\n",
+                    next_ping,
+                    result,
+                    sbb_wrapper_rasta_return_code_name(result));
             }
         }
 
         sleep_millis(10L);
     }
 
+    sbb_wrapper_diag_set_phase("main:close");
     result = sbb_endpoint_close(&endpoint);
     if (result != radef_kNoError && settings.trace) {
-        printf("[sbb-wrapper] SafRetL close returned result=%d\n", result);
+        printf("[sbb-wrapper] SafRetL close returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
     }
 
     puts("[sbb-wrapper] exiting after SafRetL run-loop smoke");

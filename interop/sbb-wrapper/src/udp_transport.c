@@ -24,6 +24,8 @@ static SbbWrapperUdpRuntimeChannel g_channels[SBB_WRAPPER_UDP_CHANNEL_COUNT] = {
 };
 static int g_initialized = 0;
 static int g_trace = 0;
+static char g_last_receive_ip[INET_ADDRSTRLEN] = "<none>";
+static uint16_t g_last_receive_port = 0u;
 
 void sbb_wrapper_udp_print_config(const SbbWrapperUdpConfig *config)
 {
@@ -185,6 +187,16 @@ int sbb_wrapper_udp_trace_enabled(void)
     return g_trace;
 }
 
+const char *sbb_wrapper_udp_last_receive_ip(void)
+{
+    return g_last_receive_ip;
+}
+
+uint16_t sbb_wrapper_udp_last_receive_port(void)
+{
+    return g_last_receive_port;
+}
+
 static SbbWrapperUdpRuntimeChannel *runtime_channel(uint32_t transport_channel_id)
 {
     if (transport_channel_id >= SBB_WRAPPER_UDP_CHANNEL_COUNT) {
@@ -292,15 +304,21 @@ SbbWrapperUdpResult sbb_wrapper_udp_receive(
         *length = (size_t)received;
     }
 
+    {
+        const char *ip = inet_ntop(AF_INET, &from_addr.sin_addr, g_last_receive_ip, sizeof(g_last_receive_ip));
+        if (ip == 0) {
+            strcpy(g_last_receive_ip, "<unknown>");
+        }
+        g_last_receive_port = ntohs(from_addr.sin_port);
+    }
+
     if (g_trace) {
-        char from_ip[INET_ADDRSTRLEN] = {0};
-        const char *ip = inet_ntop(AF_INET, &from_addr.sin_addr, from_ip, sizeof(from_ip));
         printf(
             "[sbb-wrapper] udp receive channel=%u length=%zd from=%s:%u\n",
             transport_channel_id,
             received,
-            ip == 0 ? "<unknown>" : ip,
-            ntohs(from_addr.sin_port));
+            g_last_receive_ip,
+            g_last_receive_port);
     }
 
     return SBB_WRAPPER_UDP_OK;

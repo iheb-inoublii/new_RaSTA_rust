@@ -1,6 +1,7 @@
 #include "sbb_endpoint.h"
 
 #include "ping_pong_payload.h"
+#include "sbb_diagnostics.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -102,7 +103,7 @@ static const srcty_SafetyRetransmissionConfiguration k_safretl_passive_config = 
 static void trace_result(const SbbEndpoint *endpoint, const char *label, radef_RaStaReturnCode result)
 {
     if (endpoint->trace) {
-        printf("[sbb-wrapper] %s result=%d\n", label, result);
+        printf("[sbb-wrapper] %s result=%d(%s)\n", label, result, sbb_wrapper_rasta_return_code_name(result));
     }
 }
 
@@ -122,24 +123,7 @@ void sbb_endpoint_configure(SbbEndpoint *endpoint, SbbEndpointRole role, int tra
 
 const char *sbb_endpoint_state_name(int state)
 {
-    switch (state) {
-    case 0:
-        return "NotInitialized";
-    case 1:
-        return "Closed";
-    case 2:
-        return "Down";
-    case 3:
-        return "Start";
-    case 4:
-        return "Up";
-    case 5:
-        return "RetransRequest";
-    case 6:
-        return "RetransRunning";
-    default:
-        return "Unknown";
-    }
+    return sbb_wrapper_connection_state_name(state);
 }
 
 radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint)
@@ -147,6 +131,12 @@ radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint)
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result;
 
+    sbb_wrapper_diag_set_phase("sbb_endpoint_init");
+    sbb_wrapper_diag_set_context(
+        sbb_endpoint_role_name(endpoint),
+        endpoint->connection_id,
+        sbb_endpoint_local_sender_id(endpoint),
+        sbb_endpoint_remote_receiver_id(endpoint));
     sradin_Init();
     result = srapi_Init(endpoint->role == SBB_ENDPOINT_ROLE_ACTIVE ? &k_safretl_active_config : &k_safretl_passive_config);
     endpoint->initialized = (result == radef_kNoError);
@@ -158,6 +148,11 @@ radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint)
         (unsigned int)sbb_endpoint_remote_receiver_id(endpoint),
         (unsigned int)SBB_WRAPPER_SAFRETL_NETWORK_ID);
     trace_result(endpoint, "srapi_Init", result);
+    sbb_wrapper_diag_set_context(
+        sbb_endpoint_role_name(endpoint),
+        endpoint->connection_id,
+        sbb_endpoint_local_sender_id(endpoint),
+        sbb_endpoint_remote_receiver_id(endpoint));
     return result;
 #else
     (void)endpoint;
@@ -171,6 +166,12 @@ radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint)
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result;
 
+    sbb_wrapper_diag_set_phase("sbb_endpoint_open");
+    sbb_wrapper_diag_set_context(
+        sbb_endpoint_role_name(endpoint),
+        endpoint->connection_id,
+        sbb_endpoint_local_sender_id(endpoint),
+        sbb_endpoint_remote_receiver_id(endpoint));
     printf(
         "[sbb-wrapper] SafRetL open: role=%s call_srapi_OpenConnection=true sender_id=0x%02x receiver_id=0x%02x network_id=%u\n",
         sbb_endpoint_role_name(endpoint),
@@ -184,10 +185,16 @@ radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint)
         SBB_WRAPPER_SAFRETL_NETWORK_ID,
         &endpoint->connection_id);
     endpoint->open_requested = (result == radef_kNoError);
+    sbb_wrapper_diag_set_context(
+        sbb_endpoint_role_name(endpoint),
+        endpoint->connection_id,
+        sbb_endpoint_local_sender_id(endpoint),
+        sbb_endpoint_remote_receiver_id(endpoint));
     printf(
-        "[sbb-wrapper] srapi_OpenConnection: role=%s result=%d returned_connection_id=%u\n",
+        "[sbb-wrapper] srapi_OpenConnection: role=%s result=%d(%s) returned_connection_id=%u\n",
         sbb_endpoint_role_name(endpoint),
         result,
+        sbb_wrapper_rasta_return_code_name(result),
         (unsigned int)endpoint->connection_id);
     return result;
 #else
@@ -205,16 +212,23 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
     radef_RaStaReturnCode result;
 
     endpoint->poll_count += 1U;
+    sbb_wrapper_diag_set_phase("sbb_endpoint_poll:transport_poll_all");
     sbb_wrapper_transport_poll_all();
 
+    if (sbb_wrapper_diag_has_fatal()) {
+        return sbb_wrapper_diag_fatal_reason();
+    }
+
+    sbb_wrapper_diag_set_phase("sbb_endpoint_poll:srapi_CheckTimings");
     result = srapi_CheckTimings();
     if (endpoint->trace) {
-        printf("[sbb-wrapper] srapi_CheckTimings result=%d\n", result);
+        printf("[sbb-wrapper] srapi_CheckTimings result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
     }
     if (result != radef_kNoError) {
         return result;
     }
 
+    sbb_wrapper_diag_set_phase("sbb_endpoint_poll:srapi_GetConnectionState");
     result = srapi_GetConnectionState(
         endpoint->connection_id,
         &state,
@@ -245,6 +259,10 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
         endpoint->last_state = state_value;
     }
 
+    if (sbb_wrapper_diag_has_fatal()) {
+        return sbb_wrapper_diag_fatal_reason();
+    }
+
     return result;
 #else
     (void)endpoint;
@@ -267,9 +285,14 @@ radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t cou
         return radef_kInternalError;
     }
 
+    sbb_wrapper_diag_set_phase("sbb_endpoint_send_ping:srapi_SendData");
     result = srapi_SendData(endpoint->connection_id, (uint16_t)payload_length, payload);
     if (endpoint->trace) {
-        printf("[sbb-wrapper] srapi_SendData Ping(%u) result=%d\n", (unsigned int)counter, result);
+        printf(
+            "[sbb-wrapper] srapi_SendData Ping(%u) result=%d(%s)\n",
+            (unsigned int)counter,
+            result,
+            sbb_wrapper_rasta_return_code_name(result));
     }
     return result;
 #else
@@ -284,7 +307,10 @@ radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint)
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     uint8_t payload[RADEF_MAX_SR_LAYER_PAYLOAD_DATA_SIZE] = {0};
     uint16_t payload_length = 0U;
-    radef_RaStaReturnCode result = srapi_ReadData(
+    radef_RaStaReturnCode result;
+
+    sbb_wrapper_diag_set_phase("sbb_endpoint_read:srapi_ReadData");
+    result = srapi_ReadData(
         endpoint->connection_id,
         (uint16_t)sizeof(payload),
         &payload_length,
@@ -315,6 +341,10 @@ radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint)
         }
     }
 
+    if (sbb_wrapper_diag_has_fatal()) {
+        return sbb_wrapper_diag_fatal_reason();
+    }
+
     return result;
 #else
     (void)endpoint;
@@ -331,6 +361,7 @@ radef_RaStaReturnCode sbb_endpoint_close(SbbEndpoint *endpoint)
         return radef_kNotInitialized;
     }
 
+    sbb_wrapper_diag_set_phase("sbb_endpoint_close:srapi_CloseConnection");
     result = srapi_CloseConnection(endpoint->connection_id, 0U);
     trace_result(endpoint, "srapi_CloseConnection", result);
     return result;

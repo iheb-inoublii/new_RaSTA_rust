@@ -1,4 +1,5 @@
 #include "sbb_adapter.h"
+#include "sbb_diagnostics.h"
 #include "udp_transport.h"
 
 #include <stdio.h>
@@ -108,8 +109,10 @@ static void log_received_red_frame(uint32_t transport_channel_id, const uint8_t 
     }
 
     printf(
-        "[sbb-wrapper] received RedL frame: transport=%u datagram_length=%u red_length=%u sr_length=%u sr_type=0x%04x(%s) prefix=",
+        "[sbb-wrapper] received RedL frame before notification: transport=%u source=%s:%u datagram_length=%u red_length=%u sr_length=%u sr_type=0x%04x(%s) prefix=",
         transport_channel_id,
+        sbb_wrapper_udp_last_receive_ip(),
+        (unsigned int)sbb_wrapper_udp_last_receive_port(),
         length,
         red_length,
         sr_length,
@@ -126,7 +129,10 @@ void sradin_Init(void)
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result = redint_Init(&g_redl_config);
     g_redl_initialized = (result == radef_kNoError || result == radef_kAlreadyInitialized);
-    printf("[sbb-wrapper] sradin_Init: redint_Init result=%u\n", result);
+    printf(
+        "[sbb-wrapper] sradin_Init: redint_Init result=%u(%s)\n",
+        (unsigned int)result,
+        sbb_wrapper_rasta_return_code_name(result));
 #else
     g_redl_initialized = 0;
     puts("[sbb-wrapper] sradin_Init: SBB RedL not linked");
@@ -137,7 +143,11 @@ void sradin_OpenRedundancyChannel(uint32_t redundancy_channel_id)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result = redint_OpenRedundancyChannel(redundancy_channel_id);
-    printf("[sbb-wrapper] sradin_OpenRedundancyChannel: channel=%u result=%u\n", redundancy_channel_id, result);
+    printf(
+        "[sbb-wrapper] sradin_OpenRedundancyChannel: channel=%u result=%u(%s)\n",
+        redundancy_channel_id,
+        (unsigned int)result,
+        sbb_wrapper_rasta_return_code_name(result));
 #else
     printf("[sbb-wrapper] sradin_OpenRedundancyChannel: channel=%u SBB RedL not linked\n", redundancy_channel_id);
 #endif
@@ -147,7 +157,11 @@ void sradin_CloseRedundancyChannel(uint32_t redundancy_channel_id)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     radef_RaStaReturnCode result = redint_CloseRedundancyChannel(redundancy_channel_id);
-    printf("[sbb-wrapper] sradin_CloseRedundancyChannel: channel=%u result=%u\n", redundancy_channel_id, result);
+    printf(
+        "[sbb-wrapper] sradin_CloseRedundancyChannel: channel=%u result=%u(%s)\n",
+        redundancy_channel_id,
+        (unsigned int)result,
+        sbb_wrapper_rasta_return_code_name(result));
 #else
     printf("[sbb-wrapper] sradin_CloseRedundancyChannel: channel=%u SBB RedL not linked\n", redundancy_channel_id);
 #endif
@@ -162,12 +176,14 @@ void sradin_SendMessage(uint32_t redundancy_channel_id, uint16_t message_size, c
 
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     {
+        sbb_wrapper_diag_set_phase("sradin_SendMessage:redint_SendMessage");
         radef_RaStaReturnCode result = redint_SendMessage(redundancy_channel_id, message_size, message_data);
         printf(
-            "[sbb-wrapper] sradin_SendMessage: channel=%u length=%u redint_SendMessage result=%u\n",
+            "[sbb-wrapper] sradin_SendMessage: channel=%u length=%u redint_SendMessage result=%u(%s)\n",
             redundancy_channel_id,
             message_size,
-            result);
+            (unsigned int)result,
+            sbb_wrapper_rasta_return_code_name(result));
     }
 #else
     printf(
@@ -189,13 +205,17 @@ radef_RaStaReturnCode sradin_ReadMessage(
 
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     {
+        sbb_wrapper_diag_set_phase("sradin_ReadMessage:redint_CheckTimings");
         radef_RaStaReturnCode timing_result = redint_CheckTimings();
+        sbb_wrapper_diag_set_phase("sradin_ReadMessage:redint_ReadMessage");
         radef_RaStaReturnCode read_result = redint_ReadMessage(redundancy_channel_id, buffer_size, message_size, message_buffer);
         printf(
-            "[sbb-wrapper] sradin_ReadMessage: channel=%u timing_result=%u read_result=%u length=%u\n",
+            "[sbb-wrapper] sradin_ReadMessage: channel=%u timing_result=%u(%s) read_result=%u(%s) length=%u\n",
             redundancy_channel_id,
-            timing_result,
-            read_result,
+            (unsigned int)timing_result,
+            sbb_wrapper_rasta_return_code_name(timing_result),
+            (unsigned int)read_result,
+            sbb_wrapper_rasta_return_code_name(read_result),
             message_size == 0 ? 0u : *message_size);
         return read_result;
     }
@@ -228,6 +248,7 @@ void redtri_SendMessage(uint32_t transport_channel_id, uint16_t message_size, co
         return;
     }
 
+    sbb_wrapper_diag_set_phase("redtri_SendMessage:udp_send");
     result = sbb_wrapper_udp_send(transport_channel_id, message_data, message_size);
     if (result == SBB_WRAPPER_UDP_OK) {
         printf(
@@ -277,6 +298,7 @@ radef_RaStaReturnCode redtri_ReadMessage(
         return radef_kInvalidBufferSize;
     }
 
+    sbb_wrapper_diag_set_phase("redtri_ReadMessage:consume_pending");
     memcpy(message_buffer, slot->bytes, slot->length);
     *message_size = slot->length;
     slot->occupied = 0;
@@ -340,6 +362,7 @@ int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id)
             transport_channel_id);
         return 1;
     }
+    sbb_wrapper_diag_set_phase("transport_poll:redtrn_MessageReceivedNotification");
     redtrn_MessageReceivedNotification(transport_channel_id);
     printf(
         "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u invoked\n",
@@ -358,6 +381,9 @@ void sbb_wrapper_transport_poll_all(void)
     uint32_t i;
     for (i = 0u; i < SBB_WRAPPER_TRANSPORT_CHANNEL_COUNT; i += 1u) {
         (void)sbb_wrapper_transport_poll_channel(i);
+        if (sbb_wrapper_diag_has_fatal()) {
+            break;
+        }
     }
 }
 

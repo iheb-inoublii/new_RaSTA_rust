@@ -517,6 +517,28 @@ Additional SafRetL diagnostics now log:
 - `srnot_ConnectionStateNotification` state names and disconnect values.
 - `srnot_SrDiagnosticNotification` safety, address, type, SN, and CSN counters.
 
+Current blocker from Kali:
+
+- Passive initializes and opens with local sender `0x62`, remote receiver `0x61`.
+- Passive transitions `NotInitialized -> Down`.
+- Passive repeatedly logs successful timing checks, `state=Down`, and
+  `srapi_ReadData result=1` / no message.
+- Passive later aborts with `IOT instruction`.
+- The likely immediate cause is an SBB `rasys_FatalError` call.
+
+Fatal diagnostic changes:
+
+- `rasys_FatalError` logs `SBB rasys_FatalError called` before aborting.
+- The log includes numeric and symbolic `radef_RaStaReturnCode`, current role,
+  connection ID, sender ID, receiver ID, and wrapper phase.
+- stdout and stderr are flushed before the default abort.
+- `--debug-no-abort` is available only for diagnosis. It records the fatal and
+  lets the wrapper exit after the current poll/read path so the complete log can
+  be inspected. It must not be used to claim successful SBB behavior.
+- Received RedL frame logs include source endpoint, bounded hex prefix, RedL
+  length, SafRetL length, and SafRetL message type before RedL notification is
+  invoked.
+
 New smoke test:
 
 ```sh
