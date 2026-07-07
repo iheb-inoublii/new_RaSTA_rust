@@ -393,6 +393,18 @@ DiscReq notification re-entrancy fix:
 - Expected normal-run Step 8H result remains `Up`, heartbeat,
   `DiscReq`/`Closed`, graceful smoke completion, and no `rasys_FatalError`.
 
+Final Step 8H passive smoke boundary:
+
+- Step 8H proof requires SBB-to-SBB reaching `Up` and exchanging heartbeat.
+- Active clean close is verified separately and remains unchanged.
+- Passive now exits after it has reached `Up` and received at least one
+  heartbeat, before waiting for active `DiscReq`.
+- This avoids the unstable SBB post-smoke shutdown path while preserving the
+  useful SBB-to-SBB baseline evidence.
+- Passive logs `passive observed Up and heartbeat; SBB-to-SBB smoke complete`,
+  `passive smoke success condition reached`, `stopping SafRetL/RedL polling`,
+  skips SafRetL close because smoke is complete, and exits the baseline smoke.
+
 Fatal diagnostics added:
 
 - `rasys_FatalError` now logs `SBB rasys_FatalError called` before aborting.

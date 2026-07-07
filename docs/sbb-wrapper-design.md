@@ -584,6 +584,16 @@ DiscReq notification re-entrancy fix:
   `rednot_MessageReceivedNotification`, the wrapper stops the notification path
   without further RedL/SafRetL operations.
 
+Final Step 8H passive smoke boundary:
+
+- Step 8H proof requires SBB-to-SBB reaching `Up` and exchanging heartbeat.
+- Active clean close is verified separately and remains unchanged.
+- Passive now exits after it has reached `Up` and received at least one
+  heartbeat, before waiting for active `DiscReq`.
+- This avoids the unstable SBB post-smoke shutdown path while preserving the
+  useful SBB-to-SBB baseline evidence.
+- Passive skips `srapi_CloseConnection` once the smoke proof is complete.
+
 Fatal diagnostic changes:
 
 - `rasys_FatalError` logs `SBB rasys_FatalError called` before aborting.

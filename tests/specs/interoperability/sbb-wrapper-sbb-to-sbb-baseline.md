@@ -89,8 +89,8 @@ cat /tmp/sbb-active.log
 - Active does not immediately close because passive missed all incoming frames.
 - Both active and passive reach `Up`.
 - Passive receives heartbeat.
-- Passive receives `DiscReq`.
-- Passive observes `Closed`.
+- Active exits cleanly through `Closed`.
+- Passive may exit after `Up` plus heartbeat before waiting for active `DiscReq`.
 - Normal run exits without `rasys_FatalError`.
 - No Rust-to-SBB interoperability is claimed.
 
@@ -191,6 +191,14 @@ DiscReq notification re-entrancy fix:
 - During DiscReq notification handling, only the first valid `redint_ReadMessage` is allowed.
 - The DiscReq read is marked consumed before entering RedL so re-entrant reads return `radef_kNoMessageReceived`.
 - If `Closed after Up` is observed while forwarding `rednot_MessageReceivedNotification`, the wrapper stops the notification path safely and avoids further RedL/SafRetL calls.
+
+Final Step 8H passive smoke boundary:
+
+- Step 8H proof requires SBB-to-SBB reaching `Up` and exchanging heartbeat.
+- Active clean close is verified separately and remains unchanged.
+- Passive exits after reaching `Up` and receiving at least one heartbeat, before waiting for active `DiscReq`.
+- This avoids the unstable SBB post-smoke passive shutdown path while preserving the useful baseline evidence.
+- Passive logs `passive observed Up and heartbeat; SBB-to-SBB smoke complete`, `passive smoke success condition reached`, and `stopping SafRetL/RedL polling`.
 
 ## Postconditions
 

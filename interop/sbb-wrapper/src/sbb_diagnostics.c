@@ -9,6 +9,8 @@ static int g_debug_no_abort = 0;
 static int g_has_fatal = 0;
 static int g_has_reached_up = 0;
 static int g_closed_after_up = 0;
+static uint32_t g_heartbeat_count = 0u;
+static int g_smoke_complete = 0;
 static radef_RaStaReturnCode g_fatal_reason = radef_kNoError;
 
 void sbb_wrapper_diag_set_context(const char *role, uint32_t connection_id, uint32_t sender_id, uint32_t receiver_id)
@@ -59,6 +61,13 @@ void sbb_wrapper_diag_observe_connection_state(int state)
     }
 }
 
+void sbb_wrapper_diag_observe_sr_type(uint16_t sr_type)
+{
+    if (sr_type == 6220u) {
+        g_heartbeat_count += 1u;
+    }
+}
+
 int sbb_wrapper_diag_has_reached_up(void)
 {
     return g_has_reached_up;
@@ -67,6 +76,21 @@ int sbb_wrapper_diag_has_reached_up(void)
 int sbb_wrapper_diag_closed_after_up(void)
 {
     return g_closed_after_up;
+}
+
+uint32_t sbb_wrapper_diag_heartbeat_count(void)
+{
+    return g_heartbeat_count;
+}
+
+void sbb_wrapper_diag_mark_smoke_complete(void)
+{
+    g_smoke_complete = 1;
+}
+
+int sbb_wrapper_diag_smoke_complete(void)
+{
+    return g_smoke_complete;
 }
 
 const char *sbb_wrapper_diag_role(void)

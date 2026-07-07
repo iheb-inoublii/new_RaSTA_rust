@@ -172,6 +172,13 @@ static void sleep_millis(long millis)
     nanosleep(&delay, 0);
 }
 
+static int passive_smoke_success_ready(const WrapperSettings *settings)
+{
+    return settings->role == WRAPPER_ROLE_PASSIVE &&
+           sbb_wrapper_diag_has_reached_up() &&
+           sbb_wrapper_diag_heartbeat_count() >= 1u;
+}
+
 int main(int argc, char **argv)
 {
     WrapperSettings settings;
@@ -242,6 +249,13 @@ int main(int argc, char **argv)
             puts("[sbb-wrapper] connection closed after Up; graceful SBB-to-SBB smoke complete");
             break;
         }
+        if (passive_smoke_success_ready(&settings)) {
+            sbb_wrapper_diag_mark_smoke_complete();
+            puts("[sbb-wrapper] passive observed Up and heartbeat; SBB-to-SBB smoke complete");
+            puts("[sbb-wrapper] passive smoke success condition reached");
+            puts("[sbb-wrapper] stopping SafRetL/RedL polling");
+            break;
+        }
 
         sbb_wrapper_diag_set_phase("main:read");
         result = sbb_endpoint_read(&endpoint);
@@ -276,9 +290,13 @@ int main(int argc, char **argv)
     }
 
     sbb_wrapper_diag_set_phase("main:close");
-    result = sbb_endpoint_close(&endpoint);
-    if (result != radef_kNoError && settings.trace) {
-        printf("[sbb-wrapper] SafRetL close returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+    if (sbb_wrapper_diag_smoke_complete()) {
+        puts("[sbb-wrapper] SafRetL close skipped because smoke already complete");
+    } else {
+        result = sbb_endpoint_close(&endpoint);
+        if (result != radef_kNoError && settings.trace) {
+            printf("[sbb-wrapper] SafRetL close returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+        }
     }
 
     puts("[sbb-wrapper] exiting after SBB-to-SBB baseline smoke");

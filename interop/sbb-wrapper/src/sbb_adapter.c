@@ -138,6 +138,7 @@ static uint16_t decode_sr_type(const uint8_t *bytes, uint16_t length)
 
 static void note_received_sr_type(uint16_t sr_type)
 {
+    sbb_wrapper_diag_observe_sr_type(sr_type);
     if (sr_type == SBB_WRAPPER_SR_DISC_REQ) {
         g_disconnect_frame_in_progress = 1;
         g_disconnect_red_read_consumed = 0;
