@@ -18,12 +18,15 @@ use crate::connection::state_machine::{RastaState, StateMachine};
 use crate::connection::time_supervision::{
     ConfirmedTimestampDecision, TimeSupervisionError, TimeSupervisor,
 };
-use crate::port::{RandomError, RandomSource, Transport, TransportError};
+use crate::port::{RandomError, RandomSource, RastaTransport, TransportError};
 use crate::redundancy::{ChannelStatus, RedundancyLayer};
 use crate::serial;
 use crate::srl::DisconnectReason;
 use crate::time::{
     DurationMs, MonotonicClock, MonotonicInstant, ProtocolTimestamp, ProtocolTimestampSource,
+};
+use crate::trace::{
+    RastaConnectionState, RastaTraceEvent, StateTransitionTrace, TimestampCompatibilityTrace,
 };
 use crate::{
     queue::{FixedQueue, FixedQueueError},
@@ -69,8 +72,8 @@ pub enum ConnectionError {
 }
 
 pub struct RastaConnection<
-    T1: Transport,
-    T2: Transport,
+    T1: RastaTransport,
+    T2: RastaTransport,
     C: MonotonicClock + ProtocolTimestampSource,
 > {
     pub state_machine: StateMachine,
@@ -99,6 +102,8 @@ pub struct RastaConnection<
     peer_to_local_timestamp_offset: Option<DurationMs>,
     last_peer_timestamp: Option<ProtocolTimestamp>,
     timestamp_traces: FixedQueue<TimestampTraceEvent, 16>,
+    trace_events: FixedQueue<RastaTraceEvent, 64>,
+    trace_overflow_count: u32,
     rx_buffer: [u8; 512],
     tx_buffer: [u8; 512],
     app_rx_buffer: [[u8; 256]; 20],
@@ -117,7 +122,7 @@ pub struct RastaConnection<
     last_channel_statuses: [ChannelStatus; 2],
 }
 
-impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
+impl<T1: RastaTransport, T2: RastaTransport, C: MonotonicClock + ProtocolTimestampSource>
     RastaConnection<T1, T2, C>
 {
     pub fn try_new(
@@ -180,6 +185,8 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             peer_to_local_timestamp_offset: None,
             last_peer_timestamp: None,
             timestamp_traces: FixedQueue::new(),
+            trace_events: FixedQueue::new(),
+            trace_overflow_count: 0,
             rx_buffer: [0; 512],
             tx_buffer: [0; 512],
             app_rx_buffer: [[0; 256]; 20],
@@ -211,7 +218,12 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
     }
 
     pub fn transition(&mut self, new_state: RastaState) -> Result<(), ConnectionError> {
+        let from = self.state_machine.current_state;
         if self.state_machine.transition(new_state) {
+            self.record_trace_event(RastaTraceEvent::StateTransition(StateTransitionTrace {
+                from: rasta_connection_state(from),
+                to: rasta_connection_state(new_state),
+            }));
             Ok(())
         } else {
             Err(ConnectionError::StateTransitionInvalid)
@@ -242,6 +254,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
     pub fn disconnect(&mut self) -> Result<(), ConnectionError> {
         if self.state_machine.current_state != RastaState::Closed {
             self.send_disconnect(DisconnectReason::UserRequest)?;
+            self.record_trace_event(RastaTraceEvent::GracefulDisconnect);
             self.transition(RastaState::Closed)?;
             self.stop_timeliness_monitor();
             self.heartbeat.stop();
@@ -314,6 +327,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                 DiagnosticKind::ConnectionTimeout,
                 local_now.wrapping_millis(),
             );
+            self.record_trace_event(RastaTraceEvent::Timeout);
             self.disconnect_with_reason(DisconnectReason::IncomingMessageTimeout)?;
             return Err(ConnectionError::SafetyTimeout);
         }
@@ -460,6 +474,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                     }
                     PacketType::Data | PacketType::RetransmissionData => {
                         self.enqueue_application_data(&packet)?;
+                        self.record_trace_event(RastaTraceEvent::ApplicationDataReceived {
+                            len: packet.payload_len.saturating_sub(2),
+                        });
                         self.received_since_ack = self.received_since_ack.saturating_add(1);
                         if self.received_since_ack >= self.mwa {
                             self.send_packet(PacketType::Heartbeat, &[])?;
@@ -472,6 +489,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                         }
                     }
                     PacketType::Heartbeat => {
+                        self.record_trace_event(RastaTraceEvent::HeartbeatReceived);
                         if matches!(
                             self.state_machine.current_state,
                             RastaState::RetransmissionRequested | RastaState::RetransmissionRunning
@@ -560,6 +578,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
         self.record_channel_status_transitions();
         send_result.map_err(ConnectionError::Transport)?;
+        if p_type == PacketType::Heartbeat {
+            self.record_trace_event(RastaTraceEvent::HeartbeatSent);
+        }
         if self.heartbeat_send_active() {
             self.restart_send_heartbeat_timer(self.clock.now());
         }
@@ -567,6 +588,11 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
 
         if p_type == PacketType::Data && !self.retransmission.store(packet) {
             return Err(ConnectionError::BufferFull);
+        }
+        if p_type == PacketType::Data {
+            self.record_trace_event(RastaTraceEvent::ApplicationDataSent {
+                len: payload.len().saturating_sub(2),
+            });
         }
         Ok(())
     }
@@ -613,6 +639,11 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
         self.record_channel_status_transitions();
         send_result.map_err(ConnectionError::Transport)?;
+        if packet.packet_type == PacketType::RetransmissionData {
+            self.record_trace_event(RastaTraceEvent::ApplicationDataSent {
+                len: packet.payload_len.saturating_sub(2),
+            });
+        }
         if self.heartbeat_send_active() {
             self.restart_send_heartbeat_timer(self.clock.now());
         }
@@ -658,6 +689,9 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         let send_result = self.redundancy.send_at(tx_slice, self.clock.now());
         self.record_channel_status_transitions();
         send_result.map_err(ConnectionError::Transport)?;
+        if p_type == PacketType::Heartbeat {
+            self.record_trace_event(RastaTraceEvent::HeartbeatSent);
+        }
         if self.heartbeat_send_active() {
             self.restart_send_heartbeat_timer(self.clock.now());
         }
@@ -999,6 +1033,17 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         self.timestamp_traces.pop()
     }
 
+    pub fn take_trace_event(&mut self) -> Option<RastaTraceEvent> {
+        self.trace_events
+            .pop()
+            .or_else(|| self.redundancy.take_trace_event())
+    }
+
+    pub fn trace_overflow_count(&self) -> u32 {
+        self.trace_overflow_count
+            .saturating_add(self.redundancy.trace_overflow_count())
+    }
+
     pub fn diagnostic_overflow_count(&self) -> u32 {
         self.diagnostic_overflow_count
     }
@@ -1037,8 +1082,16 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
                 .confirmed_sequence_number
                 .saturating_add(1);
         }
-        if self.diagnostics.push(DiagnosticEvent { kind, value }) == Err(FixedQueueError::Full) {
+        let event = DiagnosticEvent { kind, value };
+        self.record_trace_event(RastaTraceEvent::Diagnostic(event));
+        if self.diagnostics.push(event) == Err(FixedQueueError::Full) {
             self.diagnostic_overflow_count = self.diagnostic_overflow_count.saturating_add(1);
+        }
+    }
+
+    fn record_trace_event(&mut self, event: RastaTraceEvent) {
+        if self.trace_events.push(event) == Err(FixedQueueError::Full) {
+            self.trace_overflow_count = self.trace_overflow_count.saturating_add(1);
         }
     }
 
@@ -1050,7 +1103,7 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
         rejection: Option<TimestampTraceRejection>,
         local_receive_deadline: Option<MonotonicInstant>,
     ) {
-        let _ = self.timestamp_traces.push(TimestampTraceEvent {
+        let event = TimestampTraceEvent {
             raw_peer_timestamp: packet.timestamp,
             learned_peer_offset: self
                 .peer_to_local_timestamp_offset
@@ -1060,7 +1113,19 @@ impl<T1: Transport, T2: Transport, C: MonotonicClock + ProtocolTimestampSource>
             local_receive_deadline: local_receive_deadline.map(MonotonicInstant::wrapping_millis),
             confirmed_timestamp: packet.confirmed_timestamp,
             rejection,
-        });
+        };
+        let _ = self.timestamp_traces.push(event);
+        self.record_trace_event(RastaTraceEvent::TimestampCompatibility(
+            TimestampCompatibilityTrace {
+                raw_peer_timestamp: event.raw_peer_timestamp,
+                learned_peer_offset: event.learned_peer_offset,
+                normalized_peer_timestamp: event.normalized_peer_timestamp,
+                local_timestamp: event.local_timestamp,
+                local_receive_deadline: event.local_receive_deadline,
+                confirmed_timestamp: event.confirmed_timestamp,
+                rejection: event.rejection,
+            },
+        ));
     }
 
     fn enqueue_application_data(&mut self, packet: &Packet) -> Result<(), ConnectionError> {
@@ -1224,5 +1289,16 @@ fn timestamp_rejection_from_confirmed_error(
         TimeSupervisionError::TimestampTooFarInFuture => {
             TimestampTraceRejection::RemoteTimestampTooFarInFuture
         }
+    }
+}
+
+fn rasta_connection_state(state: RastaState) -> RastaConnectionState {
+    match state {
+        RastaState::Closed => RastaConnectionState::Closed,
+        RastaState::Down => RastaConnectionState::Down,
+        RastaState::Start => RastaConnectionState::Start,
+        RastaState::Up => RastaConnectionState::Up,
+        RastaState::RetransmissionRequested => RastaConnectionState::RetransmissionRequested,
+        RastaState::RetransmissionRunning => RastaConnectionState::RetransmissionRunning,
     }
 }

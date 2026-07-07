@@ -1,5 +1,7 @@
-use crate::port::{Transport, TransportError};
+use crate::port::{RastaTransport, TransportError};
+use crate::queue::{FixedQueue, FixedQueueError};
 use crate::time::{DurationMs, MonotonicInstant};
+use crate::trace::{PacketTrace, RastaPacketType, RastaTraceEvent, TraceDirection};
 
 use super::defer_queue::DeferQueue;
 use super::frame::{HEADER_SIZE, MAX_FRAME_SIZE, parse_header, payload_range, write_header};
@@ -71,16 +73,26 @@ impl ChannelState {
     }
 }
 
-pub struct RedundancyLayer<T1: Transport, T2: Transport> {
+/// Redundancy-layer manager with one independent transport instance per channel.
+///
+/// `T1` and `T2` are separate generic parameters, so channel 0 and channel 1
+/// can use different concrete transport implementations. For example, a
+/// platform crate can pair an OS UDP transport on channel 0 with a custom raw
+/// socket or embedded Ethernet adapter on channel 1. When runtime selection is
+/// needed, users can provide their own enum or wrapper that implements
+/// `RastaTransport` and delegates to the selected transport.
+pub struct RedundancyLayer<T1: RastaTransport, T2: RastaTransport> {
     transport_a: T1,
     transport_b: T2,
     config: RedundancyConfig,
     sequence: RedundancySequence,
     deferred: DeferQueue,
     channels: [ChannelState; 2],
+    trace_events: FixedQueue<RastaTraceEvent, 32>,
+    trace_overflow_count: u32,
 }
 
-impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
+impl<T1: RastaTransport, T2: RastaTransport> RedundancyLayer<T1, T2> {
     pub const HEADER_SIZE: usize = HEADER_SIZE;
 
     pub fn new(transport_a: T1, transport_b: T2) -> Self {
@@ -95,6 +107,8 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
             sequence: RedundancySequence::new(),
             deferred: DeferQueue::new(),
             channels: [ChannelState::new(), ChannelState::new()],
+            trace_events: FixedQueue::new(),
+            trace_overflow_count: 0,
         }
     }
 
@@ -108,6 +122,14 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
 
     pub fn channel_counters(&self, channel: ChannelId) -> ChannelCounters {
         self.channels[channel.index()].counters
+    }
+
+    pub fn take_trace_event(&mut self) -> Option<RastaTraceEvent> {
+        self.trace_events.pop()
+    }
+
+    pub fn trace_overflow_count(&self) -> u32 {
+        self.trace_overflow_count
     }
 
     pub fn send(&mut self, data: &[u8]) -> Result<(), TransportError> {
@@ -137,6 +159,8 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
             .ok_or(TransportError::BufferTooSmall)?;
         let result_a = self.transport_a.send(frame);
         let result_b = self.transport_b.send(frame);
+        self.record_packet_trace(TraceDirection::Tx, ChannelId::Channel0, frame);
+        self.record_packet_trace(TraceDirection::Tx, ChannelId::Channel1, frame);
         self.record_send_result(ChannelId::Channel0, result_a.is_ok(), now);
         self.record_send_result(ChannelId::Channel1, result_b.is_ok(), now);
         if result_a.is_err() && result_b.is_err() {
@@ -172,6 +196,9 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
             match result {
                 Ok(0) => {}
                 Ok(bytes_read) => {
+                    if let Some(frame) = temporary.get(..bytes_read) {
+                        self.record_packet_trace(TraceDirection::Rx, channel, frame);
+                    }
                     match self.accept_frame(channel, &temporary, bytes_read, buffer, now) {
                         Ok(Some(length)) => return Ok(length),
                         Ok(None) => {}
@@ -405,6 +432,48 @@ impl<T1: Transport, T2: Transport> RedundancyLayer<T1, T2> {
                 state.counters.status_transition_count.saturating_add(1);
         }
     }
+
+    fn record_packet_trace(&mut self, direction: TraceDirection, channel: ChannelId, frame: &[u8]) {
+        let event = RastaTraceEvent::Packet(packet_trace(direction, channel, frame));
+        if self.trace_events.push(event) == Err(FixedQueueError::Full) {
+            self.trace_overflow_count = self.trace_overflow_count.saturating_add(1);
+        }
+    }
+}
+
+fn packet_trace(direction: TraceDirection, channel: ChannelId, frame: &[u8]) -> PacketTrace {
+    let frame_len = frame.len();
+    let redundancy_sequence = read_u32(frame, 4).unwrap_or_default();
+    let packet_type = read_u16(frame, 10).map(RastaPacketType::from);
+    PacketTrace {
+        direction,
+        channel: channel.index() as u8,
+        frame_len,
+        redundancy_sequence,
+        packet_type,
+        receiver_id: read_u32(frame, 12),
+        sender_id: read_u32(frame, 16),
+        sequence_number: read_u32(frame, 20),
+        confirmed_sequence_number: read_u32(frame, 24),
+        timestamp: read_u32(frame, 28),
+        confirmed_timestamp: read_u32(frame, 32),
+    }
+}
+
+fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_le_bytes([
+        *bytes.get(offset)?,
+        *bytes.get(offset + 1)?,
+    ]))
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes([
+        *bytes.get(offset)?,
+        *bytes.get(offset + 1)?,
+        *bytes.get(offset + 2)?,
+        *bytes.get(offset + 3)?,
+    ]))
 }
 
 #[cfg(test)]
@@ -685,6 +754,50 @@ mod tests {
     }
 
     #[test]
+    fn different_transport_types_can_be_assigned_per_redundancy_channel() {
+        struct UdpLikeMock(Rc<Cell<u8>>);
+        struct RawLikeMock(Rc<Cell<u8>>);
+
+        impl Transport for UdpLikeMock {
+            fn send(&mut self, _data: &[u8]) -> Result<(), TransportError> {
+                self.0.set(self.0.get().saturating_add(1));
+                Ok(())
+            }
+
+            fn receive(&mut self, _data: &mut [u8]) -> Result<usize, TransportError> {
+                Ok(0)
+            }
+        }
+
+        impl Transport for RawLikeMock {
+            fn send(&mut self, _data: &[u8]) -> Result<(), TransportError> {
+                self.0.set(self.0.get().saturating_add(1));
+                Ok(())
+            }
+
+            fn receive(&mut self, _data: &mut [u8]) -> Result<usize, TransportError> {
+                Ok(0)
+            }
+        }
+
+        let udp_calls = Rc::new(Cell::new(0));
+        let raw_calls = Rc::new(Cell::new(0));
+        let mut layer = RedundancyLayer::with_config(
+            UdpLikeMock(udp_calls.clone()),
+            RawLikeMock(raw_calls.clone()),
+            no_crc(),
+        );
+
+        assert_eq!(layer.send(b"frame"), Ok(()));
+        assert_eq!(udp_calls.get(), 1);
+        assert_eq!(raw_calls.get(), 1);
+        assert_eq!(
+            layer.channel_statuses(),
+            [ChannelStatus::Healthy, ChannelStatus::Healthy]
+        );
+    }
+
+    #[test]
     fn single_channel_send_failure_degrades_only_that_channel() {
         let mut layer = RedundancyLayer::with_config(
             MockTransport {
@@ -785,6 +898,18 @@ mod tests {
                 .channel_counters(ChannelId::Channel0)
                 .receive_failure_count,
             1
+        );
+    }
+
+    #[test]
+    fn receive_no_data_on_both_channels_is_not_fatal() {
+        let mut layer =
+            RedundancyLayer::with_config(MockTransport::empty(), MockTransport::empty(), no_crc());
+
+        assert_eq!(layer.receive(&mut [0u8; 8]), Ok(0));
+        assert_eq!(
+            layer.channel_statuses(),
+            [ChannelStatus::Unknown, ChannelStatus::Unknown]
         );
     }
 

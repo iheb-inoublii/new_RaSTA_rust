@@ -6,8 +6,10 @@ extern crate std;
 /// Temporary marker for the workspace migration.
 pub const WORKSPACE_SKELETON_VERSION: u8 = 1;
 
+pub mod application;
 pub mod config;
 pub mod connection;
+pub mod endpoint;
 pub mod io;
 pub mod port;
 pub mod queue;
@@ -16,6 +18,7 @@ pub mod serial;
 pub mod service;
 pub mod srl;
 pub mod time;
+pub mod trace;
 
 #[cfg(test)]
 mod tests;
