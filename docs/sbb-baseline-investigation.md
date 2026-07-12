@@ -185,6 +185,8 @@ SBB configuration values are now documented. Step 8H later confirmed the SBB wra
 
 The wrapper architecture is documented in `docs/sbb-wrapper-design.md`. It describes why a wrapper is needed, how SBB adapter functions map to UDP sockets, and what must still be confirmed before any Rust-to-SBB interoperability claim.
 
+The original Step 8B planning spec is recorded in `tests/specs/interoperability/sbb-wrapper-plan.md`. It captures the documentation-only wrapper objective, proposed active/passive commands, provisional UDP mapping, evidence to collect, and open points.
+
 ## Next Steps
 
 1. Keep the Step 8H SBB-to-SBB wrapper baseline unchanged.

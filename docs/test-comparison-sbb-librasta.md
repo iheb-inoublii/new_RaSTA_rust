@@ -8,6 +8,8 @@ The SBB RaSTA stack has a documented local baseline investigation in `docs/sbb-b
 
 No ready UDP client/server demo executable was found in the SBB build output. Only GoogleTest unit-test binaries were identified, so live Rust-to-SBB interoperability likely requires a small SBB adapter/wrapper executable that implements the SBB transport integration interfaces.
 
+This differs from the earlier librasta work: librasta had runnable local examples/configuration that allowed direct Rust-to-librasta testing, while SBB exposes library modules, unit-test binaries, and required adapter interfaces. That is why the SBB path first needed a wrapper design, then wrapper implementation, before Rust-to-SBB live testing.
+
 Do not claim Rust-to-SBB interoperability yet. Step 8H verified the SBB wrapper SBB-to-SBB baseline, and Step 8I adds an opt-in Rust `sbb-local` preparation profile and CLI selection only. The next evidence step is a live Rust active endpoint against an SBB passive wrapper.
 
 | Test area | What librasta/SBB-style tests usually cover | Current Rust coverage if known | Gap | Planned Rust test/spec file |

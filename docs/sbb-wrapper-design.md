@@ -70,6 +70,17 @@ RedL transport
 
 For a first local wrapper, use one SBB redundancy channel pair for one connection and two UDP sockets for the two transport channels.
 
+The original Step 8B planning-only proposal used ports compatible with the earlier Rust/librasta local defaults and marked them provisional:
+
+| Side | Channel | Local port | Remote port |
+| --- | --- | --- | --- |
+| SBB active | channel 0 | `9998` | `8888` |
+| SBB active | channel 1 | `9999` | `8889` |
+| SBB passive | channel 0 | `8888` | `9998` |
+| SBB passive | channel 1 | `8889` | `9999` |
+
+Later wrapper work changed the actual SBB wrapper baseline mapping to the ports below so SBB and Rust/SBB preparation traffic can be distinguished from the librasta-local setup:
+
 Example deterministic local mapping:
 
 | Side | Channel | Local port | Remote port |
@@ -82,6 +93,53 @@ Example deterministic local mapping:
 The exact mapping can change during implementation, but it must be documented and deterministic.
 
 The SBB baseline RedL config uses two redundancy channels, with channel 0 transport IDs `{0, 1}` and channel 1 transport IDs `{2, 3}`. Step 8C must confirm the correct mapping between those IDs, the selected SBB connection, and UDP sockets.
+
+## Proposed CLI
+
+The Step 8B wrapper plan proposed a small active/passive command line:
+
+```sh
+sbb-rasta-wrapper active <remote_ip> --rounds 10 --run-seconds 30 --trace
+sbb-rasta-wrapper passive <remote_ip> --rounds 10 --run-seconds 30 --trace
+```
+
+The CLI should print the role, selected local/remote ports, connection IDs, state transitions, RedL frame lengths, SafRetL return codes when available, Ping/Pong counters, and any adapter or transport errors.
+
+## Adapter Implementation Plan
+
+The wrapper owns the integration code that SBB expects from an application:
+
+- `redtri_Init`: open and bind deterministic nonblocking UDP sockets for each configured transport channel.
+- `redtri_SendMessage`: send one complete RedL frame as one UDP datagram to the configured peer endpoint.
+- `redtri_ReadMessage`: receive one complete UDP datagram into the caller-provided buffer and return `radef_kNoMessageReceived` when no datagram is available.
+- `sradin_Init`: initialize the SafRetL-to-RedL adapter side.
+- `sradin_OpenRedundancyChannel`: open the matching RedL channel for the selected connection.
+- `sradin_CloseRedundancyChannel`: close the matching RedL channel during graceful shutdown.
+- `sradin_SendMessage`: forward one SafRetL frame into RedL.
+- `sradin_ReadMessage`: read one SafRetL frame from RedL without fabricating protocol success.
+
+## Application Flow
+
+Active flow:
+
+1. Initialize adapter and UDP transport.
+2. Initialize SBB SafRetL with the SBB safety retransmission configuration.
+3. Open connection sender `0x61`, receiver `0x62`, network `123456`.
+4. Periodically call the SBB timing/polling function.
+5. Send fixed-format Ping messages.
+6. Read Pong messages.
+7. Close gracefully after the requested rounds or run duration.
+
+Passive flow:
+
+1. Initialize adapter and UDP transport.
+2. Initialize SBB SafRetL.
+3. Periodically call the SBB timing/polling function.
+4. Read Ping messages.
+5. Reply with Pong messages.
+6. Close gracefully when requested, after timeout, or after the run duration.
+
+The exact passive open/listen behavior must be confirmed from SBB headers, source, and tests before claiming live interoperability.
 
 ## Role Mapping
 
