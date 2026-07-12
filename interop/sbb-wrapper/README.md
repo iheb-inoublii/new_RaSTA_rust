@@ -393,7 +393,7 @@ DiscReq notification re-entrancy fix:
 - Expected normal-run Step 8H result remains `Up`, heartbeat,
   `DiscReq`/`Closed`, graceful smoke completion, and no `rasys_FatalError`.
 
-Final Step 8H passive smoke boundary:
+Final Step 8H passive smoke boundary before Ping/Pong runtime work:
 
 - Step 8H proof requires SBB-to-SBB reaching `Up` and exchanging heartbeat.
 - Active clean close is verified separately and remains unchanged.
@@ -404,6 +404,15 @@ Final Step 8H passive smoke boundary:
 - Passive logs `passive observed Up and heartbeat; SBB-to-SBB smoke complete`,
   `passive smoke success condition reached`, `stopping SafRetL/RedL polling`,
   skips SafRetL close because smoke is complete, and exits the baseline smoke.
+
+Step 8I replaces that early passive exit for Ping/Pong runs:
+
+- Passive stays alive after `Up` and heartbeat.
+- Passive reads Ping payloads, logs `received Ping(counter)`, sends matching
+  Pong payloads, and logs `sent Pong(counter)`.
+- Active sends `Ping(1)..Ping(N)` and waits for `Pong(1)..Pong(N)`.
+- Runtime summaries report `success=true` only after all requested rounds
+  complete.
 
 Fatal diagnostics added:
 
@@ -453,7 +462,7 @@ interoperability.
 The CLI runtime log now says:
 
 ```text
-Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed
+Step 8I SBB-to-SBB Ping/Pong runtime smoke only; no Rust-to-SBB interop is claimed
 ```
 
 ## CLI
@@ -475,17 +484,16 @@ Default port mapping:
 | active | channel 0 | `7100` | `7000` |
 | active | channel 1 | `7101` | `7001` |
 
-For now, the executable logs Step 8H SBB-to-SBB baseline smoke status, prints
-settings, opens two nonblocking UDP sockets, initializes the RedL adapter and
-SafRetL, runs `srapi_CheckTimings`/state/read polling for `--run-seconds`, and
-closes sockets. If the connection reaches `Up` and then transitions to
-`Closed`, the wrapper treats that as graceful smoke-test completion and stops
-polling. Both roles call `srapi_OpenConnection`: active uses the client
-ID ordering `0x61 -> 0x62` and passive uses the server/listening ID ordering
-`0x62 -> 0x61`. Startup logs print the selected connection ID, sender ID,
-receiver ID, network ID, and whether `srapi_OpenConnection` is called. Sample
-Ping payloads are sent only if SafRetL reports `Up`. This still does not
-establish or claim Rust-to-SBB interoperability.
+For now, the executable logs Step 8I SBB-to-SBB Ping/Pong runtime smoke status,
+prints settings, opens two nonblocking UDP sockets, initializes the RedL adapter
+and SafRetL, runs `srapi_CheckTimings`/state/read polling for `--run-seconds`,
+and closes sockets. Both roles call `srapi_OpenConnection`: active uses the
+client ID ordering `0x61 -> 0x62` and passive uses the server/listening ID
+ordering `0x62 -> 0x61`. Startup logs print the selected connection ID, sender
+ID, receiver ID, network ID, and whether `srapi_OpenConnection` is called.
+Active sends Ping payloads only after SafRetL reports `Up`; passive replies
+with matching Pong payloads. This still does not establish or claim Rust-to-SBB
+interoperability.
 
 ## Ping/Pong Payload
 

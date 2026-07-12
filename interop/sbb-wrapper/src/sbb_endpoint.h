@@ -10,6 +10,17 @@
 #define SBB_WRAPPER_SAFRETL_RECEIVER_ID 0x62u
 #define SBB_WRAPPER_SAFRETL_CONNECTION_ID 0u
 
+typedef enum SbbEndpointAppKind {
+    SBB_ENDPOINT_APP_NONE = 0,
+    SBB_ENDPOINT_APP_PING = 1,
+    SBB_ENDPOINT_APP_PONG = 2
+} SbbEndpointAppKind;
+
+typedef struct SbbEndpointAppMessage {
+    SbbEndpointAppKind kind;
+    uint32_t counter;
+} SbbEndpointAppMessage;
+
 typedef enum SbbEndpointRole {
     SBB_ENDPOINT_ROLE_ACTIVE = 0,
     SBB_ENDPOINT_ROLE_PASSIVE = 1
@@ -32,6 +43,8 @@ radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t counter);
+radef_RaStaReturnCode sbb_endpoint_send_pong(SbbEndpoint *endpoint, uint32_t counter);
+radef_RaStaReturnCode sbb_endpoint_read_message(SbbEndpoint *endpoint, SbbEndpointAppMessage *message);
 radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_close(SbbEndpoint *endpoint);
 int sbb_endpoint_is_up(const SbbEndpoint *endpoint);

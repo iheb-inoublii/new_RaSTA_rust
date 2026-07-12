@@ -289,7 +289,10 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
 #endif
 }
 
-radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t counter)
+static radef_RaStaReturnCode sbb_endpoint_send_payload(
+    SbbEndpoint *endpoint,
+    uint32_t counter,
+    int is_ping)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     uint8_t payload[SBB_WRAPPER_PING_PONG_PAYLOAD_LEN] = {0};
@@ -300,15 +303,18 @@ radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t cou
         return radef_kInvalidOperationInCurrentState;
     }
 
-    if (sbb_wrapper_encode_ping(counter, payload, sizeof(payload), &payload_length) != SBB_WRAPPER_PAYLOAD_OK) {
+    if ((is_ping
+             ? sbb_wrapper_encode_ping(counter, payload, sizeof(payload), &payload_length)
+             : sbb_wrapper_encode_pong(counter, payload, sizeof(payload), &payload_length)) != SBB_WRAPPER_PAYLOAD_OK) {
         return radef_kInternalError;
     }
 
-    sbb_wrapper_diag_set_phase("sbb_endpoint_send_ping:srapi_SendData");
+    sbb_wrapper_diag_set_phase(is_ping ? "sbb_endpoint_send_ping:srapi_SendData" : "sbb_endpoint_send_pong:srapi_SendData");
     result = srapi_SendData(endpoint->connection_id, (uint16_t)payload_length, payload);
     if (endpoint->trace) {
         printf(
-            "[sbb-wrapper] srapi_SendData Ping(%u) result=%d(%s)\n",
+            "[sbb-wrapper] srapi_SendData %s(%u) result=%d(%s)\n",
+            is_ping ? "Ping" : "Pong",
             (unsigned int)counter,
             result,
             sbb_wrapper_rasta_return_code_name(result));
@@ -317,16 +323,32 @@ radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t cou
 #else
     (void)endpoint;
     (void)counter;
+    (void)is_ping;
     return radef_kNotInitialized;
 #endif
 }
 
-radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint)
+radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t counter)
+{
+    return sbb_endpoint_send_payload(endpoint, counter, 1);
+}
+
+radef_RaStaReturnCode sbb_endpoint_send_pong(SbbEndpoint *endpoint, uint32_t counter)
+{
+    return sbb_endpoint_send_payload(endpoint, counter, 0);
+}
+
+radef_RaStaReturnCode sbb_endpoint_read_message(SbbEndpoint *endpoint, SbbEndpointAppMessage *message)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     uint8_t payload[RADEF_MAX_SR_LAYER_PAYLOAD_DATA_SIZE] = {0};
     uint16_t payload_length = 0U;
     radef_RaStaReturnCode result;
+
+    if (message != 0) {
+        message->kind = SBB_ENDPOINT_APP_NONE;
+        message->counter = 0U;
+    }
 
     sbb_wrapper_diag_set_phase("sbb_endpoint_read:srapi_ReadData");
     result = srapi_ReadData(
@@ -352,6 +374,10 @@ radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint)
                 "[sbb-wrapper] received %s(%u)\n",
                 kind == SBB_WRAPPER_PAYLOAD_KIND_PING ? "Ping" : "Pong",
                 (unsigned int)counter);
+            if (message != 0) {
+                message->kind = kind == SBB_WRAPPER_PAYLOAD_KIND_PING ? SBB_ENDPOINT_APP_PING : SBB_ENDPOINT_APP_PONG;
+                message->counter = counter;
+            }
         } else if (endpoint->trace) {
             printf(
                 "[sbb-wrapper] received SafRetL payload length=%u decode_result=%d\n",
@@ -367,8 +393,14 @@ radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint)
     return result;
 #else
     (void)endpoint;
+    (void)message;
     return radef_kNotInitialized;
 #endif
+}
+
+radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint)
+{
+    return sbb_endpoint_read_message(endpoint, 0);
 }
 
 radef_RaStaReturnCode sbb_endpoint_close(SbbEndpoint *endpoint)

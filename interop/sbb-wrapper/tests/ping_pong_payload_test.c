@@ -70,6 +70,39 @@ static int expect_rejects(void)
     return 0;
 }
 
+static int expect_repeated_counters(void)
+{
+    uint32_t counter;
+    for (counter = 1u; counter <= 5u; counter += 1u) {
+        uint8_t buffer[SBB_WRAPPER_PING_PONG_PAYLOAD_LEN] = {0};
+        size_t written = 0;
+        SbbWrapperPayloadKind kind = SBB_WRAPPER_PAYLOAD_KIND_PONG;
+        uint32_t decoded = 0u;
+
+        if (sbb_wrapper_encode_ping(counter, buffer, sizeof(buffer), &written) != SBB_WRAPPER_PAYLOAD_OK) {
+            return 30;
+        }
+        if (sbb_wrapper_decode_ping_pong(buffer, written, &kind, &decoded) != SBB_WRAPPER_PAYLOAD_OK) {
+            return 31;
+        }
+        if (kind != SBB_WRAPPER_PAYLOAD_KIND_PING || decoded != counter) {
+            return 32;
+        }
+
+        if (sbb_wrapper_encode_pong(counter, buffer, sizeof(buffer), &written) != SBB_WRAPPER_PAYLOAD_OK) {
+            return 33;
+        }
+        if (sbb_wrapper_decode_ping_pong(buffer, written, &kind, &decoded) != SBB_WRAPPER_PAYLOAD_OK) {
+            return 34;
+        }
+        if (kind != SBB_WRAPPER_PAYLOAD_KIND_PONG || decoded != counter) {
+            return 35;
+        }
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     int result = expect_ping();
@@ -82,5 +115,10 @@ int main(void)
         return result;
     }
 
-    return expect_rejects();
+    result = expect_rejects();
+    if (result != 0) {
+        return result;
+    }
+
+    return expect_repeated_counters();
 }

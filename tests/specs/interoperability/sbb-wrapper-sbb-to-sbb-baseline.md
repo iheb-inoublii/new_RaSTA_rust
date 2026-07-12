@@ -192,13 +192,20 @@ DiscReq notification re-entrancy fix:
 - The DiscReq read is marked consumed before entering RedL so re-entrant reads return `radef_kNoMessageReceived`.
 - If `Closed after Up` is observed while forwarding `rednot_MessageReceivedNotification`, the wrapper stops the notification path safely and avoids further RedL/SafRetL calls.
 
-Final Step 8H passive smoke boundary:
+Final Step 8H passive smoke boundary before Ping/Pong runtime work:
 
 - Step 8H proof requires SBB-to-SBB reaching `Up` and exchanging heartbeat.
 - Active clean close is verified separately and remains unchanged.
 - Passive exits after reaching `Up` and receiving at least one heartbeat, before waiting for active `DiscReq`.
 - This avoids the unstable SBB post-smoke passive shutdown path while preserving the useful baseline evidence.
 - Passive logs `passive observed Up and heartbeat; SBB-to-SBB smoke complete`, `passive smoke success condition reached`, and `stopping SafRetL/RedL polling`.
+
+Step 8I changes the application runtime after this baseline:
+
+- Passive stays alive after `Up` and heartbeat during Ping/Pong runs.
+- Passive exits successfully only after receiving all requested Ping counters and sending matching Pong counters.
+- Active exits successfully only after receiving all expected Pong counters.
+- Runtime summaries report sent/received counts and `success=true/false`.
 
 ## Postconditions
 
@@ -224,5 +231,5 @@ Partially automated. Smoke tests are automated in CMake. The two-process baselin
 
 ## Open points
 
-- Verify in Kali that the post-disconnect polling fix prevents `rasys_FatalError` in the normal run.
-- Do not attempt Rust-to-SBB until SBB-to-SBB behavior is understood.
+- Verify in Kali that Step 8I active/passive Ping/Pong completes all requested rounds.
+- Do not attempt Rust-to-SBB until SBB-to-SBB Ping/Pong behavior is understood.
