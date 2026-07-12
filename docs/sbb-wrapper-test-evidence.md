@@ -83,6 +83,46 @@ Expected summary lines after a successful two-process run:
 [sbb-wrapper] passive summary: received_pings=N sent_pongs=N success=true
 ```
 
+## Step 8J: SBB-to-SBB Ping/Pong Runtime Success
+
+Kali commands:
+
+```sh
+./build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 5 --trace --run-seconds 30
+./build/sbb-rasta-wrapper active 127.0.0.1 --rounds 5 --trace --run-seconds 30
+```
+
+Filtered passive result:
+
+```text
+passive received Ping(1)
+passive sent Pong(1)
+passive received Ping(2)
+passive sent Pong(2)
+passive received Ping(3)
+passive sent Pong(3)
+passive received Ping(4)
+passive sent Pong(4)
+passive received Ping(5)
+passive sent Pong(5)
+passive Ping/Pong success condition reached
+passive summary: received_pings=5 sent_pongs=5 success=true
+```
+
+Filtered active result:
+
+```text
+active received Pong(1)
+active received Pong(2)
+active received Pong(3)
+active received Pong(4)
+active received Pong(5)
+active Ping/Pong success condition reached
+active summary: sent_pings=5 received_pongs=5 success=true
+```
+
+Interpretation: SBB-wrapper-to-SBB-wrapper Ping/Pong works for five ordered application rounds over an established SBB RaSTA connection. This is not Rust-to-SBB interoperability.
+
 ## Limitations
 
 This is wrapper-only evidence. It does not prove Rust-to-SBB interoperability, does not add Docker, and does not modify Rust protocol behavior or Rust applications.

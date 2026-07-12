@@ -46,13 +46,19 @@ No Rust protocol behavior is changed. No Docker setup or Rust-to-SBB interoperab
 - Previous gap: passive stopped after `Up` and heartbeat, so active Ping messages were not answered with Pong replies.
 - Runtime change: passive remains alive after `Up`, decodes Ping counters, sends matching Pong counters, and exits successfully only after all requested rounds are answered.
 - Active runtime change: active waits for all expected Pong counters before reporting success.
-- Live SBB active/passive Ping/Pong run: pending Kali verification after rebuild.
+- Rust-to-SBB interoperability: pending; no success claim is made.
+
+## Step 8J status
+- SBB-to-SBB Ping/Pong: passed.
+- Passive received `Ping(1)..Ping(5)` and sent `Pong(1)..Pong(5)`.
+- Passive summary: `received_pings=5 sent_pongs=5 success=true`.
+- Active received `Pong(1)..Pong(5)`.
+- Active summary: `sent_pings=5 received_pongs=5 success=true`.
 - Rust-to-SBB interoperability: pending; no success claim is made.
 
 ## Automation status
 Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
 
 ## Open points
-- Verify passive/active Ping/Pong runtime in Kali.
 - Observe timestamp behavior live.
-- Capture packet lengths before claiming Rust-to-SBB compatibility.
+- Run Rust-to-SBB live interoperability before claiming Rust/SBB compatibility.

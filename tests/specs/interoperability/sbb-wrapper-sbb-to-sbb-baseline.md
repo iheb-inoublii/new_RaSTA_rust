@@ -207,6 +207,19 @@ Step 8I changes the application runtime after this baseline:
 - Active exits successfully only after receiving all expected Pong counters.
 - Runtime summaries report sent/received counts and `success=true/false`.
 
+Step 8J actual successful runtime evidence:
+
+- Command pair:
+  - `./build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 5 --trace --run-seconds 30`
+  - `./build/sbb-rasta-wrapper active 127.0.0.1 --rounds 5 --trace --run-seconds 30`
+- Passive received `Ping(1)` through `Ping(5)`.
+- Passive sent `Pong(1)` through `Pong(5)`.
+- Passive logged `passive Ping/Pong success condition reached`.
+- Passive summary: `received_pings=5 sent_pongs=5 success=true`.
+- Active received `Pong(1)` through `Pong(5)`.
+- Active logged `active Ping/Pong success condition reached`.
+- Active summary: `sent_pings=5 received_pongs=5 success=true`.
+
 ## Postconditions
 
 - Rust protocol code remains unchanged.
@@ -231,5 +244,5 @@ Partially automated. Smoke tests are automated in CMake. The two-process baselin
 
 ## Open points
 
-- Verify in Kali that Step 8I active/passive Ping/Pong completes all requested rounds.
-- Do not attempt Rust-to-SBB until SBB-to-SBB Ping/Pong behavior is understood.
+- SBB-wrapper-to-SBB-wrapper Ping/Pong has passed.
+- Do not claim Rust-to-SBB interoperability until a live Rust/SBB run passes.

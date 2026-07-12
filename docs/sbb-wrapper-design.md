@@ -672,8 +672,22 @@ data, not a protocol PDU change.
 This remains SBB-wrapper-only behavior. It does not modify Rust protocol code,
 Rust applications, Docker, or Rust-to-SBB interoperability status.
 
-## Remaining Work After Step 8I
+## Step 8J SBB-To-SBB Ping/Pong Result
 
-1. Verify in Kali that Step 8I active/passive Ping/Pong completes all requested rounds.
-2. Run Rust active to SBB passive with captured traces only after SBB-to-SBB Ping/Pong is stable.
-3. Do not claim Rust-to-SBB interoperability until the live Rust/SBB run passes.
+The Kali two-process SBB wrapper runtime passed for five application rounds:
+
+- Passive received `Ping(1)..Ping(5)`.
+- Passive sent `Pong(1)..Pong(5)`.
+- Passive summary reported `received_pings=5 sent_pongs=5 success=true`.
+- Active received `Pong(1)..Pong(5)`.
+- Active summary reported `sent_pings=5 received_pongs=5 success=true`.
+
+Status:
+
+- SBB wrapper active/passive Ping/Pong: passed.
+- Rust-to-SBB live interoperability: pending.
+
+## Remaining Work After Step 8J
+
+1. Run Rust active to SBB passive with captured traces only after SBB-to-SBB Ping/Pong is stable.
+2. Do not claim Rust-to-SBB interoperability until the live Rust/SBB run passes.
