@@ -7,6 +7,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 set(SBB_ROOT "" CACHE PATH "Path to an external SBB RaSTA stack checkout")
+set(SBB_RASTA_ROOT "" CACHE PATH "Alias for SBB_ROOT used by early wrapper planning docs")
+
+if(NOT SBB_ROOT AND SBB_RASTA_ROOT)
+    set(SBB_ROOT "${SBB_RASTA_ROOT}" CACHE PATH "Path to an external SBB RaSTA stack checkout" FORCE)
+endif()
 
 if(SBB_ROOT AND EXISTS "${SBB_ROOT}/source/modules/rasta_redundancy/CMakeLists.txt")
     message(STATUS "SBB_ROOT=${SBB_ROOT}")

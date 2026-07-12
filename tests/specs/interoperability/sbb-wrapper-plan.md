@@ -39,6 +39,11 @@ No Rust protocol behavior is changed. No SBB C wrapper source code is required b
 ## Automation status
 Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
 
+## Skeleton status
+Step 8D adds the wrapper skeleton under `interop/sbb-wrapper`. The current source is split into `main.c`, `sbb_adapter.c`, `sbb_system_adapter.c`, `udp_transport.c`, `ping_pong_payload.c`, endpoint helpers, and notification helpers rather than one monolithic C file. This structure provides the planned `sradin_*`, `redtri_*`, and `rasys_*` entry points while keeping the artifact isolated from Rust protocol code.
+
+Compile verification is tracked separately by the wrapper build and skeleton specs. Live Rust-to-SBB interoperability remains pending until a real Rust/SBB live test passes.
+
 ## Open points
 - Confirm the exact SBB timing/polling function from `srapi_sr_api.h`.
 - Verify passive open/listen behavior.

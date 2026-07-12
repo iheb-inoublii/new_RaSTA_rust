@@ -57,6 +57,8 @@ Skeleton with real UDP transport only. The wrapper builds in Kali, opens UDP soc
 
 Step 8D verified that CMake configure and build pass in Kali with `SBB_ROOT=/root/sbb-investigation/sbb-rasta-stack`. The build creates `ping_pong_payload_test` and `sbb-rasta-wrapper`. Passive and active CLI smoke checks pass, while still logging skeleton-only status.
 
+The wrapper CMake now accepts both `SBB_ROOT` and the early planning alias `SBB_RASTA_ROOT`; `SBB_RASTA_ROOT` is mapped to `SBB_ROOT` when the latter is unset.
+
 ## Open points
 
 - Confirm exact SBB adapter and transport function signatures.

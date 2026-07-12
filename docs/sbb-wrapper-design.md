@@ -235,14 +235,30 @@ Current files:
 
 - `README.md`: skeleton status, build command, CLI examples, and stub list.
 - `CMakeLists.txt`: standalone CMake project that accepts `SBB_ROOT` but does not link SBB yet and builds `sbb-rasta-wrapper`.
+- `CMakeLists.txt`: accepts `SBB_RASTA_ROOT` as an alias for the original planning variable name and maps it to `SBB_ROOT`.
 - `src/main.c`: active/passive CLI parser and deterministic settings logging.
 - `src/sbb_adapter.h` / `src/sbb_adapter.c`: required `sradin_*` symbols connected to SBB RedL when `SBB_ROOT` is provided, plus `redtri_*` functions connected to wrapper UDP transport.
 - `src/udp_transport.h` / `src/udp_transport.c`: two-channel POSIX UDP transport for Kali/Linux.
 - `src/ping_pong_payload.h` / `src/ping_pong_payload.c`: Ping/Pong codec compatible with Rust `ApplicationMessage`.
+- `src/sbb_system_adapter.c`: required `rasys_*` system adapter functions.
+- `src/README.md`: source responsibility map for the split skeleton files.
 - `tests/ping_pong_payload_test.c`: C codec smoke test.
 - `tests/udp_transport_test.c`: loopback UDP datagram and no-message smoke test.
 
 The Step 8C skeleton deliberately did not modify the Rust protocol implementation, modify the external SBB checkout, or claim Rust-to-SBB interoperability. The later Step 8I Rust profile preparation is documented separately in `docs/sbb-rust-interop-plan.md`.
+
+## Step 8D Skeleton
+
+Step 8D added the isolated `interop/sbb-wrapper` skeleton for future Rust-to-SBB work. The requested single `src/sbb_rasta_wrapper.c` responsibility is represented by the split source layout under `src/`:
+
+- `main.c` owns CLI parsing and the intended active/passive run loop.
+- `sbb_adapter.c` owns `sradin_*` and `redtri_*` adapter entry points.
+- `sbb_system_adapter.c` owns `rasys_*` system hooks.
+- `ping_pong_payload.c` owns the Rust-compatible Ping/Pong payload format.
+
+The skeleton prepares calls to SBB RedL/SafRetL APIs such as `redint_Init`, `redint_OpenRedundancyChannel`, `redint_SendMessage`, `redint_ReadMessage`, `redint_CheckTimings`, `srapi_Init`, `srapi_OpenConnection`, `srapi_SendData`, `srapi_ReadData`, `srapi_GetConnectionState`, and `srapi_CheckTimings`.
+
+Step 8D did not require Windows CMake validation. The next step was to compile the skeleton against a local SBB checkout in Kali and fix wrapper-only include/link issues. No Rust endpoint behavior or existing Rust apps were changed by the wrapper skeleton.
 
 ## Step 8C Build Command
 
