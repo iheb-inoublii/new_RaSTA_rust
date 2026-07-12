@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rasta-core",
+    "crates/rasta-platform",
+    "apps/rasta-node",
+    "apps/signal-controller",
+    "apps/interlocking-controller",
+    "apps/ping-pong-node",
+]
