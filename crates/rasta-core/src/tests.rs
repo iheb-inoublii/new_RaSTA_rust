@@ -577,6 +577,23 @@ mod cases {
         (frame, total)
     }
 
+    fn encode_frame_with_safety(
+        packet: &Packet,
+        safety: &SafetyCodeConfig,
+        rl_sequence: u32,
+    ) -> ([u8; 520], usize) {
+        let mut srl = [0u8; 512];
+        let srl_len = packet.serialize(&mut srl, safety).unwrap();
+        let total =
+            RedundancyLayer::<SimpleMockTransport, SimpleMockTransport>::HEADER_SIZE + srl_len;
+        let mut frame = [0u8; 520];
+        frame[..2].copy_from_slice(&(total as u16).to_le_bytes());
+        frame[2..4].copy_from_slice(&0u16.to_le_bytes());
+        frame[4..8].copy_from_slice(&rl_sequence.to_le_bytes());
+        frame[8..total].copy_from_slice(&srl[..srl_len]);
+        (frame, total)
+    }
+
     const LIBRASTA_C_CONNREQ: [u8; 50] = [
         0x32, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x38, 0x18, 0x61, 0x00, 0x00,
         0x00, 0x60, 0x00, 0x00, 0x00, 0x04, 0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x44, 0x33,
@@ -712,6 +729,50 @@ mod cases {
         assert_eq!(LIBRASTA_C_CONNRESP.len(), 50);
         assert_eq!(LIBRASTA_C_HEARTBEAT.len(), 36);
         assert_eq!(LIBRASTA_C_DISCREQ.len(), 40);
+    }
+
+    #[test]
+    fn sbb_local_profile_uses_sbb_observed_redl_datagram_lengths() {
+        let profile = RastaProfile::sbb_local().unwrap();
+        assert_eq!(profile, RastaProfile::SBB_LOCAL);
+        assert_eq!(profile.network_identifier, 123_456);
+        assert_eq!(profile.safety_code_length, SafetyCodeLength::Md4Lower8);
+        assert_eq!(profile.redundancy_crc, RedundancyCrc::OptionA);
+        assert_eq!(profile.t_max_ms, 750);
+        assert_eq!(profile.t_h_ms, 300);
+        assert_eq!(profile.t_seq_ms, 50);
+        assert_eq!(
+            profile.timestamp_compatibility,
+            TimestampCompatibilityMode::PeerRelative
+        );
+        assert_eq!(
+            profile.validate(),
+            Err(ConfigError::UnsafeNoChecksumRequiresOptIn)
+        );
+        assert!(profile.validate_allowing_unsafe_no_checksums().is_ok());
+
+        let safety = SafetyCodeConfig::md4_low8(profile.md4_initial_value);
+        let redundancy = RedundancyConfig {
+            check_code: RedundancyCheckCode::OptionA,
+            t_seq_ms: profile.t_seq_ms,
+        };
+        assert_eq!(safety.len(), 8);
+        assert_eq!(redundancy.check_code_len(), 0);
+
+        let mut conn_req = packet(PacketType::ConnectionRequest, 14);
+        conn_req.payload[0..4].copy_from_slice(&profile.protocol_version);
+        conn_req.payload[4..6].copy_from_slice(&(profile.mwa as u16).to_le_bytes());
+        let (_, conn_req_len) = encode_frame_with_safety(&conn_req, &safety, 0);
+        assert_eq!(conn_req_len, 58);
+
+        let heartbeat = packet(PacketType::Heartbeat, 0);
+        let (_, heartbeat_len) = encode_frame_with_safety(&heartbeat, &safety, 1);
+        assert_eq!(heartbeat_len, 44);
+
+        let mut disconnect = packet(PacketType::DisconnectionRequest, 4);
+        disconnect.payload[0..4].copy_from_slice(&0u32.to_le_bytes());
+        let (_, disconnect_len) = encode_frame_with_safety(&disconnect, &safety, 2);
+        assert_eq!(disconnect_len, 48);
     }
 
     #[test]

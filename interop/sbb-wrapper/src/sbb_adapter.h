@@ -66,5 +66,7 @@ radef_RaStaReturnCode redtri_ReadMessage(
 void sbb_wrapper_transport_poll_all(void);
 int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id);
 uint32_t sbb_wrapper_transport_pending_count(uint32_t transport_channel_id);
+int sbb_wrapper_redl_begin_message_notification(uint32_t redundancy_channel_id);
+void sbb_wrapper_redl_end_message_notification(uint32_t redundancy_channel_id);
 
 #endif

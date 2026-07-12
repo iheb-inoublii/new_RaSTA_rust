@@ -30,10 +30,18 @@ int main(void)
     sradin_SendMessage(0u, (uint16_t)sizeof(dummy_sr_pdu), dummy_sr_pdu);
 
     read_result = sradin_ReadMessage(0u, (uint16_t)sizeof(read_buffer), &read_length, read_buffer);
-    if (read_result != radef_kNoMessageReceived && read_result != radef_kNoError) {
+    if (read_result != radef_kNoMessageReceived || read_length != 0u) {
         sradin_CloseRedundancyChannel(0u);
         sbb_wrapper_udp_close();
         return 2;
+    }
+
+    read_length = 99u;
+    read_result = sradin_ReadMessage(0u, (uint16_t)sizeof(read_buffer), &read_length, read_buffer);
+    if (read_result != radef_kNoMessageReceived || read_length != 0u) {
+        sradin_CloseRedundancyChannel(0u);
+        sbb_wrapper_udp_close();
+        return 3;
     }
 
     sradin_CloseRedundancyChannel(0u);

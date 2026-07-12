@@ -179,6 +179,13 @@ int main(int argc, char **argv)
     radef_RaStaReturnCode result;
     uint32_t end_time;
     unsigned int next_ping = 1u;
+    unsigned int expected_pong = 1u;
+    unsigned int expected_ping = 1u;
+    unsigned int sent_pings = 0u;
+    unsigned int received_pongs = 0u;
+    unsigned int received_pings = 0u;
+    unsigned int sent_pongs = 0u;
+    int application_success = 0;
 
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
         print_usage(argv[0]);
@@ -190,7 +197,7 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    puts("[sbb-wrapper] Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed");
+    puts("[sbb-wrapper] Step 8I SBB-to-SBB Ping/Pong runtime smoke only; no Rust-to-SBB interop is claimed");
     print_settings(&settings);
     sbb_wrapper_diag_set_debug_no_abort(settings.debug_no_abort);
 
@@ -242,11 +249,45 @@ int main(int argc, char **argv)
             puts("[sbb-wrapper] connection closed after Up; graceful SBB-to-SBB smoke complete");
             break;
         }
-
         sbb_wrapper_diag_set_phase("main:read");
-        result = sbb_endpoint_read(&endpoint);
-        if (result != radef_kNoError && result != radef_kNoMessageReceived) {
-            printf("[sbb-wrapper] SafRetL read returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+        {
+            SbbEndpointAppMessage message;
+            result = sbb_endpoint_read_message(&endpoint, &message);
+            if (result == radef_kNoError && message.kind == SBB_ENDPOINT_APP_PONG && settings.role == WRAPPER_ROLE_ACTIVE) {
+                if (message.counter == expected_pong) {
+                    received_pongs += 1u;
+                    expected_pong += 1u;
+                } else {
+                    printf(
+                        "[sbb-wrapper] unexpected Pong order: expected=%u received=%u\n",
+                        expected_pong,
+                        (unsigned int)message.counter);
+                }
+            } else if (result == radef_kNoError && message.kind == SBB_ENDPOINT_APP_PING && settings.role == WRAPPER_ROLE_PASSIVE) {
+                if (message.counter == expected_ping) {
+                    received_pings += 1u;
+                    expected_ping += 1u;
+                } else {
+                    printf(
+                        "[sbb-wrapper] unexpected Ping order: expected=%u received=%u\n",
+                        expected_ping,
+                        (unsigned int)message.counter);
+                }
+                sbb_wrapper_diag_set_phase("main:send_pong");
+                result = sbb_endpoint_send_pong(&endpoint, message.counter);
+                if (result == radef_kNoError) {
+                    sent_pongs += 1u;
+                    printf("[sbb-wrapper] sent Pong(%u)\n", (unsigned int)message.counter);
+                } else {
+                    printf(
+                        "[sbb-wrapper] Pong(%u) not sent result=%d(%s)\n",
+                        (unsigned int)message.counter,
+                        result,
+                        sbb_wrapper_rasta_return_code_name(result));
+                }
+            } else if (result != radef_kNoError && result != radef_kNoMessageReceived) {
+                printf("[sbb-wrapper] SafRetL read returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+            }
         }
         if (sbb_wrapper_diag_has_fatal()) {
             result = sbb_wrapper_diag_fatal_reason();
@@ -262,6 +303,7 @@ int main(int argc, char **argv)
             result = sbb_endpoint_send_ping(&endpoint, next_ping);
             if (result == radef_kNoError) {
                 printf("[sbb-wrapper] sent Ping(%u)\n", next_ping);
+                sent_pings += 1u;
                 next_ping += 1u;
             } else if (settings.trace) {
                 printf(
@@ -272,16 +314,47 @@ int main(int argc, char **argv)
             }
         }
 
+        if (settings.role == WRAPPER_ROLE_ACTIVE && sent_pings == settings.rounds && received_pongs == settings.rounds) {
+            application_success = 1;
+            puts("[sbb-wrapper] active Ping/Pong success condition reached");
+            break;
+        }
+        if (settings.role == WRAPPER_ROLE_PASSIVE && received_pings == settings.rounds && sent_pongs == settings.rounds) {
+            application_success = 1;
+            sbb_wrapper_diag_mark_smoke_complete();
+            puts("[sbb-wrapper] passive Ping/Pong success condition reached");
+            puts("[sbb-wrapper] stopping SafRetL/RedL polling after replying to all Pings");
+            break;
+        }
+
         sleep_millis(10L);
     }
 
-    sbb_wrapper_diag_set_phase("main:close");
-    result = sbb_endpoint_close(&endpoint);
-    if (result != radef_kNoError && settings.trace) {
-        printf("[sbb-wrapper] SafRetL close returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+    if (settings.role == WRAPPER_ROLE_ACTIVE) {
+        printf(
+            "[sbb-wrapper] active summary: sent_pings=%u received_pongs=%u success=%s\n",
+            sent_pings,
+            received_pongs,
+            application_success ? "true" : "false");
+    } else {
+        printf(
+            "[sbb-wrapper] passive summary: received_pings=%u sent_pongs=%u success=%s\n",
+            received_pings,
+            sent_pongs,
+            application_success ? "true" : "false");
     }
 
-    puts("[sbb-wrapper] exiting after SBB-to-SBB baseline smoke");
+    sbb_wrapper_diag_set_phase("main:close");
+    if (sbb_wrapper_diag_smoke_complete()) {
+        puts("[sbb-wrapper] SafRetL close skipped because smoke already complete");
+    } else {
+        result = sbb_endpoint_close(&endpoint);
+        if (result != radef_kNoError && settings.trace) {
+            printf("[sbb-wrapper] SafRetL close returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+        }
+    }
+
+    puts("[sbb-wrapper] exiting after SBB-to-SBB Ping/Pong runtime smoke");
     sbb_wrapper_udp_close();
-    return 0;
+    return application_success ? 0 : 1;
 }

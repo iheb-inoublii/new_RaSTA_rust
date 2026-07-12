@@ -1,6 +1,8 @@
 mod profile;
 
-use profile::{DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE};
+use profile::{
+    DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE, SBB_LOCAL_PROFILE,
+};
 use rasta_core::endpoint::{ConnectionStatus, RastaEndpoint, config_from_profile};
 use rasta_core::port::{Transport, TransportError};
 use rasta_core::trace::{
@@ -28,6 +30,7 @@ enum NodeRole {
 enum RuntimeProfile {
     Academic,
     LibrastaLocal,
+    SbbLocal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,6 +201,7 @@ fn parse_runtime_profile(value: &str) -> Result<RuntimeProfile, &'static str> {
     match value {
         "academic" => Ok(RuntimeProfile::Academic),
         "librasta-local" => Ok(RuntimeProfile::LibrastaLocal),
+        "sbb-local" => Ok(RuntimeProfile::SbbLocal),
         _ => Err("invalid profile"),
     }
 }
@@ -207,12 +211,9 @@ fn apply_profile_defaults(
     role: NodeRole,
     endpoint: &mut EndpointDefaults,
 ) {
-    if profile != RuntimeProfile::LibrastaLocal {
-        return;
-    }
-
-    *endpoint = match role {
-        NodeRole::A => EndpointDefaults {
+    *endpoint = match (profile, role) {
+        (RuntimeProfile::Academic, _) => return,
+        (RuntimeProfile::LibrastaLocal, NodeRole::A) => EndpointDefaults {
             channel_0_local_port: 9998,
             channel_0_remote_port: 8888,
             channel_1_local_port: 9999,
@@ -220,13 +221,29 @@ fn apply_profile_defaults(
             sender_id: 0x60,
             remote_id: 0x61,
         },
-        NodeRole::B => EndpointDefaults {
+        (RuntimeProfile::LibrastaLocal, NodeRole::B) => EndpointDefaults {
             channel_0_local_port: 8888,
             channel_0_remote_port: 9998,
             channel_1_local_port: 8889,
             channel_1_remote_port: 9999,
             sender_id: 0x61,
             remote_id: 0x60,
+        },
+        (RuntimeProfile::SbbLocal, NodeRole::A) => EndpointDefaults {
+            channel_0_local_port: 7100,
+            channel_0_remote_port: 7000,
+            channel_1_local_port: 7101,
+            channel_1_remote_port: 7001,
+            sender_id: 0x61,
+            remote_id: 0x62,
+        },
+        (RuntimeProfile::SbbLocal, NodeRole::B) => EndpointDefaults {
+            channel_0_local_port: 7000,
+            channel_0_remote_port: 7100,
+            channel_1_local_port: 7001,
+            channel_1_remote_port: 7101,
+            sender_id: 0x62,
+            remote_id: 0x61,
         },
     };
 }
@@ -437,7 +454,7 @@ fn main() {
         Ok(settings) => settings,
         Err("missing arguments") => {
             println!(
-                "Usage: {} <A|B> <remote_ip> [--profile academic|librasta-local] [--run-seconds N] [interop options]",
+                "Usage: {} <A|B> <remote_ip> [--profile academic|librasta-local|sbb-local] [--run-seconds N] [interop options]",
                 args[0]
             );
             return;
@@ -512,10 +529,13 @@ fn main() {
     let profile = match settings.profile {
         RuntimeProfile::Academic => DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE,
         RuntimeProfile::LibrastaLocal => LIBRASTA_LOCAL_PROFILE,
+        RuntimeProfile::SbbLocal => SBB_LOCAL_PROFILE,
     };
     let profile_validation = match settings.profile {
         RuntimeProfile::Academic => profile.validate(),
-        RuntimeProfile::LibrastaLocal => profile.validate_allowing_unsafe_no_checksums(),
+        RuntimeProfile::LibrastaLocal | RuntimeProfile::SbbLocal => {
+            profile.validate_allowing_unsafe_no_checksums()
+        }
     };
     if let Err(error) = profile_validation {
         eprintln!("Invalid interoperability-test profile: {:?}", error);
@@ -525,7 +545,10 @@ fn main() {
         settings.sender_id,
         settings.remote_id,
         profile,
-        settings.profile == RuntimeProfile::LibrastaLocal,
+        matches!(
+            settings.profile,
+            RuntimeProfile::LibrastaLocal | RuntimeProfile::SbbLocal
+        ),
     ) {
         Ok(config) => config,
         Err(error) => {
@@ -770,6 +793,41 @@ mod tests {
         assert_eq!(b.remote_addr_b, "127.0.0.1:9999");
         assert_eq!(b.sender_id, 0x61);
         assert_eq!(b.remote_id, 0x60);
+    }
+
+    #[test]
+    fn parses_sbb_local_profile_defaults() {
+        let a = parse_node_settings(&args(&[
+            "rasta-node",
+            "A",
+            "127.0.0.1",
+            "--profile",
+            "sbb-local",
+        ]))
+        .unwrap();
+        assert_eq!(a.profile, RuntimeProfile::SbbLocal);
+        assert_eq!(a.local_addr_a, "0.0.0.0:7100");
+        assert_eq!(a.remote_addr_a, "127.0.0.1:7000");
+        assert_eq!(a.local_addr_b, "0.0.0.0:7101");
+        assert_eq!(a.remote_addr_b, "127.0.0.1:7001");
+        assert_eq!(a.sender_id, 0x61);
+        assert_eq!(a.remote_id, 0x62);
+
+        let b = parse_node_settings(&args(&[
+            "rasta-node",
+            "B",
+            "127.0.0.1",
+            "--profile",
+            "sbb-local",
+        ]))
+        .unwrap();
+        assert_eq!(b.profile, RuntimeProfile::SbbLocal);
+        assert_eq!(b.local_addr_a, "0.0.0.0:7000");
+        assert_eq!(b.remote_addr_a, "127.0.0.1:7100");
+        assert_eq!(b.local_addr_b, "0.0.0.0:7001");
+        assert_eq!(b.remote_addr_b, "127.0.0.1:7101");
+        assert_eq!(b.sender_id, 0x62);
+        assert_eq!(b.remote_id, 0x61);
     }
 
     #[test]

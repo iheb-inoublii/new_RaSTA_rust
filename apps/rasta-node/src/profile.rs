@@ -8,10 +8,13 @@ use rasta_core::config::RastaProfile;
 pub const DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE: RastaProfile =
     RastaProfile::ACADEMIC_DEFAULT;
 pub const LIBRASTA_LOCAL_PROFILE: RastaProfile = RastaProfile::LIBRASTA_LOCAL;
+pub const SBB_LOCAL_PROFILE: RastaProfile = RastaProfile::SBB_LOCAL;
 
 #[cfg(test)]
 mod tests {
-    use super::{DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE};
+    use super::{
+        DIN_RASTA_03_03_INTEROPERABILITY_TEST_PROFILE, LIBRASTA_LOCAL_PROFILE, SBB_LOCAL_PROFILE,
+    };
     use rasta_core::config::{
         ConfigError, InteroperabilityProfile, SafetyCodeLength, TimestampCompatibilityMode,
     };
@@ -49,6 +52,26 @@ mod tests {
         );
         assert_eq!(profile.t_max_ms, 10_000);
         assert_eq!(profile.t_h_ms, 2_000);
+        assert_eq!(
+            profile.timestamp_compatibility,
+            TimestampCompatibilityMode::PeerRelative
+        );
+        assert!(profile.validate_allowing_unsafe_no_checksums().is_ok());
+    }
+
+    #[test]
+    fn sbb_local_profile_matches_known_wrapper_baseline() {
+        let profile = SBB_LOCAL_PROFILE;
+        assert_eq!(profile.protocol_version, *b"0303");
+        assert_eq!(profile.network_identifier, 123_456);
+        assert_eq!(profile.safety_code_length, SafetyCodeLength::Md4Lower8);
+        assert_eq!(
+            profile.redundancy_crc,
+            rasta_core::redundancy::RedundancyCrc::OptionA
+        );
+        assert_eq!(profile.t_max_ms, 750);
+        assert_eq!(profile.t_h_ms, 300);
+        assert_eq!(profile.t_seq_ms, 50);
         assert_eq!(
             profile.timestamp_compatibility,
             TimestampCompatibilityMode::PeerRelative

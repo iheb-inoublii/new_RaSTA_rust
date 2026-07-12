@@ -89,8 +89,8 @@ cat /tmp/sbb-active.log
 - Active does not immediately close because passive missed all incoming frames.
 - Both active and passive reach `Up`.
 - Passive receives heartbeat.
-- Passive receives `DiscReq`.
-- Passive observes `Closed`.
+- Active exits cleanly through `Closed`.
+- Passive may exit after `Up` plus heartbeat before waiting for active `DiscReq`.
 - Normal run exits without `rasys_FatalError`.
 - No Rust-to-SBB interoperability is claimed.
 
@@ -172,6 +172,41 @@ Post-disconnect fix:
 - `debug_no_abort` remains diagnostic only; the normal run should not hit `rasys_FatalError`.
 - Step 8H success condition is `Up`, heartbeat, `DiscReq`/`Closed`, and no `rasys_FatalError` in the normal run.
 
+Remaining Up-state fatal and fix:
+
+- Kali showed passive could still call `rasys_FatalError reason=6(InvalidParameter)` while still `Up`, before the later `DiscReq`.
+- The fatal phase was `sradin_ReadMessage:redint_ReadMessage`.
+- The likely cause was `sradin_ReadMessage` entering `redint_ReadMessage` even when no RedL upper-layer message notification was active.
+- The wrapper now tracks RedL channel-open state and a one-shot RedL read allowance per redundancy channel.
+- `rednot_MessageReceivedNotification` grants the allowance while forwarding to `sradno_MessageReceivedNotification`.
+- `sradin_ReadMessage` calls `redint_ReadMessage` only when the channel is open, the connection is not closed after `Up`, and a RedL message notification is currently active.
+- Poll-style calls outside this notification flow return `radef_kNoMessageReceived`.
+- `sbb_adapter_bridge_test` now checks repeated no-pending `sradin_ReadMessage` calls return `NoMessageReceived`.
+
+DiscReq notification re-entrancy fix:
+
+- Kali showed the final normal-run abort happened while passive handled `sr_type=0x1848(DiscReq)`.
+- SBB closed RedL/SafRetL during that notification, but the same callback stack could still re-enter `sradin_ReadMessage` / `redint_ReadMessage`.
+- The wrapper now marks DiscReq before calling `redtrn_MessageReceivedNotification`.
+- During DiscReq notification handling, only the first valid `redint_ReadMessage` is allowed.
+- The DiscReq read is marked consumed before entering RedL so re-entrant reads return `radef_kNoMessageReceived`.
+- If `Closed after Up` is observed while forwarding `rednot_MessageReceivedNotification`, the wrapper stops the notification path safely and avoids further RedL/SafRetL calls.
+
+Final Step 8H passive smoke boundary before Ping/Pong runtime work:
+
+- Step 8H proof requires SBB-to-SBB reaching `Up` and exchanging heartbeat.
+- Active clean close is verified separately and remains unchanged.
+- Passive exits after reaching `Up` and receiving at least one heartbeat, before waiting for active `DiscReq`.
+- This avoids the unstable SBB post-smoke passive shutdown path while preserving the useful baseline evidence.
+- Passive logs `passive observed Up and heartbeat; SBB-to-SBB smoke complete`, `passive smoke success condition reached`, and `stopping SafRetL/RedL polling`.
+
+Step 8I changes the application runtime after this baseline:
+
+- Passive stays alive after `Up` and heartbeat during Ping/Pong runs.
+- Passive exits successfully only after receiving all requested Ping counters and sending matching Pong counters.
+- Active exits successfully only after receiving all expected Pong counters.
+- Runtime summaries report sent/received counts and `success=true/false`.
+
 ## Postconditions
 
 - Rust protocol code remains unchanged.
@@ -185,6 +220,8 @@ Post-disconnect fix:
 - `interop/sbb-wrapper/src/sbb_redundancy_notifications.c`
 - `interop/sbb-wrapper/src/sbb_safety_notifications.c`
 - `interop/sbb-wrapper/src/sbb_endpoint.c`
+- `interop/sbb-wrapper/src/sbb_redundancy_notifications.c`
+- `interop/sbb-wrapper/tests/sbb_adapter_bridge_test.c`
 - `interop/sbb-wrapper/tests/sbb_transport_notification_test.c`
 - `interop/sbb-wrapper/src/main.c`
 
@@ -194,5 +231,5 @@ Partially automated. Smoke tests are automated in CMake. The two-process baselin
 
 ## Open points
 
-- Verify in Kali that the post-disconnect polling fix prevents `rasys_FatalError` in the normal run.
-- Do not attempt Rust-to-SBB until SBB-to-SBB behavior is understood.
+- Verify in Kali that Step 8I active/passive Ping/Pong completes all requested rounds.
+- Do not attempt Rust-to-SBB until SBB-to-SBB Ping/Pong behavior is understood.

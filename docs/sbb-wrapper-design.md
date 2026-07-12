@@ -1,6 +1,6 @@
 # SBB Wrapper Design Plan
 
-This is a design plan only. It does not implement an SBB wrapper, add Docker, add `RastaProfile::sbb_local()`, or claim Rust-to-SBB interoperability.
+This document started as the SBB wrapper design plan and now records the incremental wrapper status. The wrapper does not add Docker or claim Rust-to-SBB interoperability. Step 8I adds the Rust `RastaProfile::sbb_local()` preparation profile separately from the wrapper.
 
 ## Why A Wrapper Is Needed
 
@@ -184,7 +184,7 @@ Current files:
 - `tests/ping_pong_payload_test.c`: C codec smoke test.
 - `tests/udp_transport_test.c`: loopback UDP datagram and no-message smoke test.
 
-The skeleton deliberately does not modify the Rust protocol implementation, add `RastaProfile::sbb_local()`, modify the external SBB checkout, or claim Rust-to-SBB interoperability.
+The Step 8C skeleton deliberately did not modify the Rust protocol implementation, modify the external SBB checkout, or claim Rust-to-SBB interoperability. The later Step 8I Rust profile preparation is documented separately in `docs/sbb-rust-interop-plan.md`.
 
 ## Step 8C Build Command
 
@@ -234,8 +234,8 @@ Skeleton fixes made during Step 8D:
 ## Step 8E UDP Transport
 
 Step 8E adds real POSIX UDP transport inside `interop/sbb-wrapper` only. It does
-not modify Rust protocol behavior, add `RastaProfile::sbb_local()`, implement
-Docker, link SBB libraries, or claim Rust-to-SBB interoperability.
+not modify Rust protocol behavior, implement Docker, link SBB libraries, or
+claim Rust-to-SBB interoperability.
 
 UDP design:
 
@@ -385,8 +385,7 @@ Result:
 
 Step 8G adds `src/sbb_endpoint.h` and `src/sbb_endpoint.c` as a small
 wrapper-only layer around SBB SafRetL. It does not change Rust protocol code,
-add Docker, add a Rust `sbb-local` profile, or claim Rust-to-SBB
-interoperability.
+add Docker, or claim Rust-to-SBB interoperability.
 
 Exact SBB SafRetL public functions used from `srapi_sr_api.h`:
 
@@ -553,6 +552,47 @@ Post-disconnect fix:
 - Step 8H success condition is `Up`, heartbeat, `DiscReq`/`Closed`, and no
   `rasys_FatalError` in the normal run.
 
+Remaining Up-state fatal and fix:
+
+- Kali showed passive could still call `rasys_FatalError
+  reason=6(InvalidParameter)` while still `Up`, before the later `DiscReq`.
+- The fatal phase was `sradin_ReadMessage:redint_ReadMessage`.
+- This indicated the wrapper was allowing `sradin_ReadMessage` to enter RedL
+  when no RedL upper-layer message notification was active.
+- The wrapper now tracks whether each RedL channel is open and whether a
+  one-shot RedL read is currently allowed.
+- `rednot_MessageReceivedNotification` grants that one-shot allowance while it
+  forwards to `sradno_MessageReceivedNotification`.
+- `sradin_ReadMessage` only calls `redint_ReadMessage` when the channel is open,
+  the connection is not closed after `Up`, and that notification allowance is
+  present.
+- Polling calls outside this flow return `radef_kNoMessageReceived`.
+
+DiscReq notification re-entrancy fix:
+
+- The final passive abort happened during handling of
+  `sr_type=0x1848(DiscReq)`.
+- SBB closed RedL/SafRetL during the notification, then the same callback stack
+  could re-enter `sradin_ReadMessage` / `redint_ReadMessage`.
+- The wrapper now detects DiscReq before `redtrn_MessageReceivedNotification`.
+- During a DiscReq notification, only the first valid `redint_ReadMessage` is
+  allowed, and that read is marked consumed before entering RedL.
+- Re-entrant `sradin_ReadMessage` calls during the same DiscReq notification
+  return `radef_kNoMessageReceived`.
+- If `Closed after Up` is observed while forwarding
+  `rednot_MessageReceivedNotification`, the wrapper stops the notification path
+  without further RedL/SafRetL operations.
+
+Final Step 8H passive smoke boundary:
+
+- Step 8H proof requires SBB-to-SBB reaching `Up` and exchanging heartbeat.
+- Active clean close is verified separately and remains unchanged.
+- Passive now exits after it has reached `Up` and received at least one
+  heartbeat, before waiting for active `DiscReq`.
+- This avoids the unstable SBB post-smoke shutdown path while preserving the
+  useful SBB-to-SBB baseline evidence.
+- Passive skips `srapi_CloseConnection` once the smoke proof is complete.
+
 Fatal diagnostic changes:
 
 - `rasys_FatalError` logs `SBB rasys_FatalError called` before aborting.
@@ -606,10 +646,34 @@ Result:
 - `sradin_SendMessage` sent lengths `50` and `40` with result `0`.
 - Passive single-process smoke reported `srapi_Init result=0`, stayed `Closed` because no active peer was running, and shut down cleanly.
 - Active single-process smoke reported `srapi_Init result=0` and `srapi_OpenConnection result=0`, sent length `58` and `48` frames, moved `Start` then `Closed` because no passive peer was running at the same time, and shut down cleanly.
-- Runtime log now says Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed.
+- Runtime log now says Step 8I SBB-to-SBB Ping/Pong runtime smoke only; no Rust-to-SBB interop is claimed.
 
-## Remaining Work After Step 8H
+## Step 8I SBB-To-SBB Ping/Pong Runtime
 
-1. Verify in Kali that the post-disconnect polling fix prevents `rasys_FatalError` in the normal SBB-to-SBB baseline run.
-2. Run Rust active to SBB passive with captured traces only after SBB-to-SBB cleanup is stable.
-3. Only after live evidence, decide whether to add a Rust `sbb-local` profile or CLI config overrides.
+The Step 8H SBB-to-SBB baseline proved that active/passive wrappers reach `Up`
+and exchange heartbeat. The passive wrapper previously stopped after observing
+`Up` and one heartbeat, so active could send Ping messages but would not
+receive Pong replies.
+
+Step 8I changes the wrapper runtime behavior:
+
+- Passive no longer exits immediately after `Up` plus heartbeat.
+- Passive continues polling until it receives `--rounds` Ping messages and sends matching Pong replies, or until `--run-seconds` expires.
+- Active sends Ping counters from `1` through `N` after reaching `Up`.
+- Active continues polling until it receives Pong counters from `1` through `N`, or until `--run-seconds` expires.
+- Both roles print summary lines:
+  - `active summary: sent_pings=N received_pongs=N success=true/false`
+  - `passive summary: received_pings=N sent_pongs=N success=true/false`
+
+The Ping/Pong payload format remains unchanged: tag `0x03` or `0x04` followed
+by a little-endian `u32` counter. This is an application payload inside RaSTA
+data, not a protocol PDU change.
+
+This remains SBB-wrapper-only behavior. It does not modify Rust protocol code,
+Rust applications, Docker, or Rust-to-SBB interoperability status.
+
+## Remaining Work After Step 8I
+
+1. Verify in Kali that Step 8I active/passive Ping/Pong completes all requested rounds.
+2. Run Rust active to SBB passive with captured traces only after SBB-to-SBB Ping/Pong is stable.
+3. Do not claim Rust-to-SBB interoperability until the live Rust/SBB run passes.

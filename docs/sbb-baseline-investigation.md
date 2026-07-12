@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Document the manual baseline investigation of the SBB RaSTA stack before any Rust-to-SBB interoperability wrapper, Docker setup, or `sbb-local` profile is added.
+Document the manual baseline investigation of the SBB RaSTA stack before any Rust-to-SBB interoperability wrapper or Docker setup is added. Step 8I uses this evidence and the later Step 8H wrapper baseline to add an opt-in Rust `sbb-local` preparation profile, without claiming Rust-to-SBB interoperability.
 
 This is evidence capture only. It does not claim Rust-to-SBB interoperability.
 
@@ -179,19 +179,16 @@ SBB SR message tests show:
 
 The SBB stack builds and its unit-test baseline passes locally after installing `libgmock-dev`. The available executable artifacts are unit-test binaries only; no ready UDP endpoint/demo executable was found.
 
-SBB configuration values are now documented, but a runtime endpoint or adapter/wrapper executable is still needed before performing Rust-to-SBB live interoperability.
-
-Do not add `RastaProfile::sbb_local()` yet. The values are known, but a final runtime interoperability profile should wait until the SBB adapter/wrapper path is confirmed with live evidence.
+SBB configuration values are now documented. Step 8H later confirmed the SBB wrapper SBB-to-SBB baseline, so Step 8I adds an opt-in Rust `RastaProfile::sbb_local()` preparation profile. This prepares the Rust side for live testing only; it is not a Rust-to-SBB interoperability claim.
 
 ## Wrapper Design Follow-Up
 
-The planned wrapper architecture is documented in `docs/sbb-wrapper-design.md`. It describes why a wrapper is needed, how SBB adapter functions could map to UDP sockets, and what must be confirmed before any Rust-to-SBB interoperability claim or `sbb-local` profile is added.
+The wrapper architecture is documented in `docs/sbb-wrapper-design.md`. It describes why a wrapper is needed, how SBB adapter functions map to UDP sockets, and what must still be confirmed before any Rust-to-SBB interoperability claim.
 
 ## Next Steps
 
-1. Identify or create a small SBB wrapper executable that implements the required adapter interfaces.
-2. Decide how to map SBB channel transport IDs to local UDP or another test transport.
-3. Capture SBB wire traces for connection request/response, heartbeat, data, and ping-pong.
-4. Compare SBB traces against Rust packet encoding.
-5. Add an evidence-backed `sbb-local` profile only after a runnable endpoint exists.
-6. Add Rust-to-SBB handshake and ping-pong test specs once live execution is possible.
+1. Keep the Step 8H SBB-to-SBB wrapper baseline unchanged.
+2. Use the Step 8I `sbb-local` Rust preparation profile for a live Rust active to SBB passive test.
+3. Capture SBB/Rust wire traces for connection request/response, heartbeat, data, and ping-pong.
+4. Compare live traces against the existing Rust packet length tests.
+5. Claim Rust-to-SBB interoperability only after the live test passes.
