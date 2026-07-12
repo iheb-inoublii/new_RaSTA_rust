@@ -200,6 +200,13 @@ Final Step 8H passive smoke boundary:
 - This avoids the unstable SBB post-smoke passive shutdown path while preserving the useful baseline evidence.
 - Passive logs `passive observed Up and heartbeat; SBB-to-SBB smoke complete`, `passive smoke success condition reached`, and `stopping SafRetL/RedL polling`.
 
+Step 8I changes the application runtime after this baseline:
+
+- Passive stays alive after `Up` and heartbeat during Ping/Pong runs.
+- Passive exits successfully only after receiving all requested Ping counters and sending matching Pong counters.
+- Active exits successfully only after receiving all expected Pong counters.
+- Runtime summaries report sent/received counts and `success=true/false`.
+
 ## Postconditions
 
 - Rust protocol code remains unchanged.
@@ -224,5 +231,5 @@ Partially automated. Smoke tests are automated in CMake. The two-process baselin
 
 ## Open points
 
-- Verify in Kali that the post-disconnect polling fix prevents `rasys_FatalError` in the normal run.
-- Do not attempt Rust-to-SBB until SBB-to-SBB behavior is understood.
+- Verify in Kali that Step 8I active/passive Ping/Pong completes all requested rounds.
+- Do not attempt Rust-to-SBB until SBB-to-SBB Ping/Pong behavior is understood.

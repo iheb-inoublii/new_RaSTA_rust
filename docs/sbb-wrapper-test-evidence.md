@@ -101,4 +101,19 @@ The wrapper is no longer only a stub build when `SBB_ROOT` is provided. It compi
 
 ## Limitations
 
-This is wrapper-only evidence. It does not prove Rust-to-SBB interoperability, does not add Docker, and does not modify Rust protocol behavior or Rust applications. The next evidence step is an active/passive SBB wrapper runtime test, followed by a live Rust-to-SBB test.
+This is wrapper-only evidence. It does not prove Rust-to-SBB interoperability, does not add Docker, and does not modify Rust protocol behavior or Rust applications.
+
+## Step 8I Runtime Update
+
+The SBB-to-SBB wrapper baseline reaches `Up`, but the passive side previously exited after observing `Up` and heartbeat. That made the active side's `Ping(1)..Ping(N)` sends visible without corresponding Pong replies.
+
+Step 8I changes the runtime so passive stays alive after `Up`, reads Ping payloads, sends matching Pong payloads, and exits successfully only after answering the requested number of rounds. Active now exits successfully only after receiving every expected Pong.
+
+Expected summary lines after a successful two-process run:
+
+```text
+[sbb-wrapper] active summary: sent_pings=N received_pongs=N success=true
+[sbb-wrapper] passive summary: received_pings=N sent_pongs=N success=true
+```
+
+The next evidence step is a Kali two-process SBB-to-SBB Ping/Pong run, followed later by a live Rust-to-SBB test.

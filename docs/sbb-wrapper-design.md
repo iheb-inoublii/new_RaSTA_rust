@@ -488,6 +488,24 @@ Important smoke evidence:
 - Wrapper help listed `--rounds`, `--run-seconds`, `--trace`, `--debug-no-abort`, and both channel local/remote port options.
 
 This proves the wrapper compiles and links against real SBB libraries and that wrapper smoke paths execute. It is not a Rust-to-SBB live interoperability result. The next steps are the active/passive SBB wrapper runtime test and, only after that, a Rust-to-SBB live test.
+
+## Step 8I SBB-to-SBB Ping/Pong Runtime
+
+The Step 8H SBB-to-SBB baseline proved that active/passive wrappers reach `Up` and exchange heartbeat. The passive wrapper previously stopped after observing `Up` and one heartbeat, so active could send Ping messages but would not receive Pong replies.
+
+Step 8I changes the wrapper runtime behavior:
+
+- Passive no longer exits immediately after `Up` plus heartbeat.
+- Passive continues polling until it receives `--rounds` Ping messages and sends matching Pong replies, or until `--run-seconds` expires.
+- Active sends Ping counters from `1` through `N` after reaching `Up`.
+- Active continues polling until it receives Pong counters from `1` through `N`, or until `--run-seconds` expires.
+- Both roles print summary lines:
+  - `active summary: sent_pings=N received_pongs=N success=true/false`
+  - `passive summary: received_pings=N sent_pongs=N success=true/false`
+
+The Ping/Pong payload format remains unchanged: tag `0x03` or `0x04` followed by a little-endian `u32` counter. This is an application payload inside RaSTA data, not a protocol PDU change.
+
+This remains SBB-wrapper-only behavior. It does not modify Rust protocol code, Rust applications, Docker, or Rust-to-SBB interoperability status.
 other wrapper smoke tests when `SBB_ROOT` is set.
 
 ### Kali Validation Result
@@ -556,7 +574,7 @@ Smoke configuration comes from SBB test defaults:
 The CLI runtime banner is:
 
 ```text
-Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed
+Step 8I SBB-to-SBB Ping/Pong runtime smoke only; no Rust-to-SBB interop is claimed
 ```
 
 Active mode calls `srapi_OpenConnection`. Both active and passive modes poll
@@ -780,7 +798,7 @@ Result:
 - `sradin_SendMessage` sent lengths `50` and `40` with result `0`.
 - Passive single-process smoke reported `srapi_Init result=0`, stayed `Closed` because no active peer was running, and shut down cleanly.
 - Active single-process smoke reported `srapi_Init result=0` and `srapi_OpenConnection result=0`, sent length `58` and `48` frames, moved `Start` then `Closed` because no passive peer was running at the same time, and shut down cleanly.
-- Runtime log now says Step 8H SBB-to-SBB baseline smoke only; no Rust-to-SBB interop is claimed.
+- Runtime log now says Step 8I SBB-to-SBB Ping/Pong runtime smoke only; no Rust-to-SBB interop is claimed.
 
 ## Remaining Work After Step 8H
 

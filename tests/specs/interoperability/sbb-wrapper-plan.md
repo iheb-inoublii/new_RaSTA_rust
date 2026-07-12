@@ -51,6 +51,14 @@ Compile verification is tracked separately by the wrapper build and skeleton spe
 - Live SBB active/passive runtime test: pending at the time of this evidence.
 - Rust-to-SBB interoperability: pending; no success claim is made.
 
+## Step 8I status
+- SBB-to-SBB `Up` baseline: passed before this step.
+- Previous gap: passive stopped after `Up` and heartbeat, so active Ping messages were not answered with Pong replies.
+- Runtime change: passive remains alive after `Up`, decodes Ping counters, sends matching Pong counters, and exits successfully only after all requested rounds are answered.
+- Active runtime change: active waits for all expected Pong counters before reporting success.
+- Live SBB active/passive Ping/Pong run: pending Kali verification after rebuild.
+- Rust-to-SBB interoperability: pending; no success claim is made.
+
 ## Open points
 - Confirm the exact SBB timing/polling function from `srapi_sr_api.h`.
 - Verify passive open/listen behavior.
