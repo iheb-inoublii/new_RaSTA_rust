@@ -428,6 +428,66 @@ Implemented wrapper-side system adapter functions:
 
 The wrapper common target is now an object library so these integration objects
 are linked directly into `sbb-rasta-wrapper`, `sbb_adapter_bridge_test`, and the
+other smoke executables.
+
+### Step 8F: Real SBB Compile And Smoke Result
+
+Step 8F was verified in Kali against a real SBB checkout, not wrapper stubs.
+
+Environment:
+
+- wrapper path: `/home/iheb/Desktop/new_RaSTA_rust/interop/sbb-wrapper`
+- SBB path: `/home/iheb/Desktop/sbb-investigation/sbb-rasta-stack`
+
+Commands:
+
+```sh
+cmake -S. -B build -G Ninja -DSBB_ROOT=/home/iheb/Desktop/sbb-investigation/sbb-rasta-stack
+cmake --build build --verbose
+```
+
+Configure printed:
+
+```text
+-- SBB_ROOT=/home/iheb/Desktop/sbb-investigation/sbb-rasta-stack
+```
+
+The build completed successfully and linked the real SBB static libraries:
+
+- `sbb-rasta-common/librasta_common.a`
+- `sbb-rasta-redundancy/librasta_redundancy.a`
+- `sbb-rasta-safety-retransmission/librasta_safety_retransmission.a`
+
+Executable built:
+
+- `build/sbb-rasta-wrapper`
+
+Smoke commands passed:
+
+```sh
+./ping_pong_payload_test
+./udp_transport_test
+./sbb_adapter_bridge_test
+./sbb_transport_notification_test
+./sbb_safretl_smoke_test
+./sbb-rasta-wrapper --help
+```
+
+Important smoke evidence:
+
+- UDP transport opened POSIX UDP sockets.
+- `redtri_Init` reported UDP transport ready.
+- `sradin_Init` called `redint_Init` and returned `NoError`.
+- `sradin_OpenRedundancyChannel` channel 0 returned `NoError`.
+- `sradin_SendMessage` called `redint_SendMessage` and returned `NoError`.
+- `srapi_OpenConnection` active returned `NoError` and `connection_id=0`.
+- Active smoke produced a 58-byte RedL frame for a 50-byte SafRetL ConnectionRequest.
+- Active smoke produced a 48-byte RedL frame for a 40-byte SafRetL disconnect/message.
+- `sbb_transport_notification_test` passed.
+- `sbb_safretl_smoke_test` passed.
+- Wrapper help listed `--rounds`, `--run-seconds`, `--trace`, `--debug-no-abort`, and both channel local/remote port options.
+
+This proves the wrapper compiles and links against real SBB libraries and that wrapper smoke paths execute. It is not a Rust-to-SBB live interoperability result. The next steps are the active/passive SBB wrapper runtime test and, only after that, a Rust-to-SBB live test.
 other wrapper smoke tests when `SBB_ROOT` is set.
 
 ### Kali Validation Result

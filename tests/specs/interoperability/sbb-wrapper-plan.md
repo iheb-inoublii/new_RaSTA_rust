@@ -44,6 +44,13 @@ Step 8D adds the wrapper skeleton under `interop/sbb-wrapper`. The current sourc
 
 Compile verification is tracked separately by the wrapper build and skeleton specs. Live Rust-to-SBB interoperability remains pending until a real Rust/SBB live test passes.
 
+## Step 8F status
+- Skeleton compile with real SBB: passed with `SBB_ROOT=/home/iheb/Desktop/sbb-investigation/sbb-rasta-stack`.
+- Real SBB libraries linked: `librasta_common.a`, `librasta_redundancy.a`, and `librasta_safety_retransmission.a`.
+- Wrapper smoke tests: passed for payload codec, UDP transport, RedL bridge, transport notification, SafRetL smoke, and wrapper help.
+- Live SBB active/passive runtime test: pending at the time of this evidence.
+- Rust-to-SBB interoperability: pending; no success claim is made.
+
 ## Open points
 - Confirm the exact SBB timing/polling function from `srapi_sr_api.h`.
 - Verify passive open/listen behavior.

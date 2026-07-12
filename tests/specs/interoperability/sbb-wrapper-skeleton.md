@@ -59,13 +59,17 @@ Step 8D verified that CMake configure and build pass in Kali with `SBB_ROOT=/roo
 
 The wrapper CMake now accepts both `SBB_ROOT` and the early planning alias `SBB_RASTA_ROOT`; `SBB_RASTA_ROOT` is mapped to `SBB_ROOT` when the latter is unset.
 
+Step 8F supersedes the earlier stub-only status for real SBB compile evidence: the wrapper configured with `SBB_ROOT=/home/iheb/Desktop/sbb-investigation/sbb-rasta-stack`, linked real SBB static libraries, built `build/sbb-rasta-wrapper`, and passed the payload, UDP, RedL bridge, transport notification, SafRetL smoke, and help smoke checks.
+
+The Step 8F result is still wrapper-only. It distinguishes real SBB-linked compile and smoke success from Rust-to-SBB live interoperability, which remains pending.
+
 ## Open points
 
 - Confirm exact SBB adapter and transport function signatures.
 - Confirm exact SBB return-code names and values.
 - Confirm SBB timing API name and expected call cadence.
-- Link external SBB libraries through `SBB_ROOT`.
-- Implement bounded queues for SafRetL read functions if required.
+- Keep validating external SBB library linkage through `SBB_ROOT`.
+- Implement bounded queues for SafRetL read functions if required by later live scenarios.
 - Run SBB-to-SBB wrapper baseline before Rust-to-SBB.
 
 ## Evidence
