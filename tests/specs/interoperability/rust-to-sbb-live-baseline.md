@@ -83,7 +83,7 @@ SBB evidence:
 - Rust-to-SBB connection establishment: passed.
 - Rust-to-SBB heartbeat exchange: passed.
 - Rust-to-SBB application Ping/Pong 2 rounds: passed.
-- Rust-to-SBB application Ping/Pong 5 rounds: unstable / pending.
+- Rust-to-SBB application Ping/Pong 5 rounds: paced run pending live evidence.
 - Docker: pending.
 
 ## Step 8L runnable Ping-Pong command
@@ -104,6 +104,7 @@ cargo run -p ping-pong-node -- active 127.0.0.1 \
   --rounds 5 \
   --trace-wire \
   --run-seconds 30 \
+  --ping-delay-ms 300 \
   --channel-0-local-port 7100 \
   --channel-0-remote-port 7000 \
   --channel-1-local-port 7101 \
@@ -165,8 +166,21 @@ Status:
 - SBB-to-SBB Ping/Pong 5 rounds: passed.
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
-- Rust-to-SBB Ping/Pong 5 rounds: unstable / pending.
+- Rust-to-SBB Ping/Pong 5 rounds: paced run pending live evidence.
 - Docker: pending.
+
+## Step 8N pacing preparation
+The first five-round Rust-to-SBB Ping/Pong attempt was unstable after two
+rounds. Step 8N adds pacing to Rust active `ping-pong-node` without changing
+protocol behavior:
+
+- `--profile sbb-local` defaults to `--ping-delay-ms 300`.
+- Academic and `librasta-local` default to `0 ms`.
+- Active sends the next Ping only after the previous Pong is decoded and the
+  configured delay has elapsed.
+- Active prints `active summary: sent_pings=N received_pongs=M success=true/false`.
+
+This prepares the five-round run. It is not five-round success evidence.
 
 ## Evidence
 Kali Rust and SBB wrapper logs.
@@ -175,6 +189,6 @@ Kali Rust and SBB wrapper logs.
 Manual live test. Not yet automated.
 
 ## Open points
-- Stabilize and verify Rust-to-SBB application Ping/Pong for five rounds.
+- Verify the paced Rust-to-SBB application Ping/Pong run for five rounds.
 - Keep Docker pending until the non-Docker live path is stable.
 - Do not claim five-round Rust-to-SBB Ping/Pong until live evidence passes.

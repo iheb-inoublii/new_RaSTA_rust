@@ -91,6 +91,7 @@ cargo run -p ping-pong-node -- active 127.0.0.1 \
   --rounds 5 \
   --trace-wire \
   --run-seconds 30 \
+  --ping-delay-ms 300 \
   --channel-0-local-port 7100 \
   --channel-0-remote-port 7000 \
   --channel-1-local-port 7101 \
@@ -99,6 +100,16 @@ cargo run -p ping-pong-node -- active 127.0.0.1 \
 
 For the proven Step 8M live run, use `--rounds 2` and `--run-seconds 20` on
 both sides. Five rounds remain pending until stable Kali evidence is captured.
+
+Step 8N adds conservative active-side pacing for `ping-pong-node` when
+`--profile sbb-local` is selected. The default inter-ping delay is `300 ms`,
+and it can be overridden with `--ping-delay-ms N`. Academic and
+`librasta-local` runs keep the existing fast default of `0 ms`. Active mode
+only sends the next Ping after the previous Pong has been decoded, polling has
+continued through the main loop, and the configured delay has elapsed.
+
+This prepares the five-round Rust-to-SBB run but does not prove it. Capture new
+Kali evidence before changing the status from pending.
 
 ## Expected Output
 
@@ -128,4 +139,5 @@ The payload format is intentionally fixed and compact so the same scenario can l
 - Rust to SBB
 
 Rust-to-SBB connection and heartbeat are proven. Rust-to-SBB application
-Ping/Pong is proven for two rounds; five rounds remain unstable / pending.
+Ping/Pong is proven for two rounds; five rounds remain pending until the Step
+8N paced run is verified live.

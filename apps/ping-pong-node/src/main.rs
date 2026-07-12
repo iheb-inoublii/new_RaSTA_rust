@@ -10,6 +10,9 @@ use std::time::{Duration, Instant};
 
 const DEFAULT_RUN_SECONDS: u64 = 30;
 const DEFAULT_ROUNDS: u32 = 10;
+const DEFAULT_PING_DELAY_MS: u64 = 0;
+const SBB_LOCAL_PING_DELAY_MS: u64 = 300;
+const MAX_PING_DELAY_MS: u64 = 60_000;
 const MAX_RUN_SECONDS: u64 = 24 * 60 * 60;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +41,7 @@ struct Settings {
     remote_id: u32,
     rounds: u32,
     run_seconds: u64,
+    ping_delay_ms: u64,
     trace: bool,
 }
 
@@ -57,7 +61,7 @@ fn main() {
         Ok(settings) => settings,
         Err("missing arguments") => {
             println!(
-                "Usage: {} <active|passive> <remote_ip> [--rounds N] [--run-seconds N] [--profile academic|librasta-local|sbb-local] [--trace|--trace-wire] [channel port overrides]",
+                "Usage: {} <active|passive> <remote_ip> [--rounds N] [--run-seconds N] [--ping-delay-ms N] [--profile academic|librasta-local|sbb-local] [--trace|--trace-wire] [channel port overrides]",
                 args[0]
             );
             return;
@@ -74,6 +78,7 @@ fn main() {
     println!("Profile: {:?}", settings.profile);
     println!("Rounds: {}", settings.rounds);
     println!("Run seconds: {}", settings.run_seconds);
+    println!("Ping delay ms: {}", settings.ping_delay_ms);
     println!(
         "Channel A: {} -> {}",
         settings.local_addr_a, settings.remote_addr_a
@@ -99,10 +104,9 @@ fn main() {
     let start = Instant::now();
     let mut up_since: Option<Instant> = None;
     let mut last_status = endpoint.status();
-    let mut next_ping = 1u32;
-    let mut next_pong = 1u32;
-    let mut next_ping_at = Instant::now();
-    let mut waiting_for_pong = false;
+    let mut active_state = ActivePingPongState::new(Instant::now());
+    let ping_delay = Duration::from_millis(settings.ping_delay_ms);
+    let mut active_success = false;
 
     loop {
         if let Err(error) = endpoint.poll() {
@@ -127,16 +131,15 @@ fn main() {
                 Role::Active => run_active(
                     &mut endpoint,
                     settings.rounds,
-                    &mut next_ping,
-                    &mut next_pong,
-                    &mut waiting_for_pong,
-                    &mut next_ping_at,
+                    &mut active_state,
+                    ping_delay,
                 ),
                 Role::Passive => run_passive(&mut endpoint),
             }
         }
 
-        if settings.role == Role::Active && next_pong > settings.rounds {
+        if settings.role == Role::Active && active_state.is_complete(settings.rounds) {
+            active_success = true;
             println!("Completed {} ping-pong rounds", settings.rounds);
             println!("Graceful disconnect...");
             if let Err(error) = endpoint.close() {
@@ -157,29 +160,83 @@ fn main() {
 
         thread::sleep(Duration::from_millis(10));
     }
+
+    if settings.role == Role::Active {
+        println!(
+            "active summary: sent_pings={} received_pongs={} success={}",
+            active_state.sent_pings, active_state.received_pongs, active_success
+        );
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ActivePingPongState {
+    next_ping: u32,
+    next_pong: u32,
+    waiting_for_pong: bool,
+    next_ping_at: Instant,
+    sent_pings: u32,
+    received_pongs: u32,
+}
+
+impl ActivePingPongState {
+    fn new(now: Instant) -> Self {
+        Self {
+            next_ping: 1,
+            next_pong: 1,
+            waiting_for_pong: false,
+            next_ping_at: now,
+            sent_pings: 0,
+            received_pongs: 0,
+        }
+    }
+
+    fn should_send_ping(&self, rounds: u32, now: Instant) -> bool {
+        !self.waiting_for_pong && self.next_ping <= rounds && now >= self.next_ping_at
+    }
+
+    fn current_ping(&self) -> u32 {
+        self.next_ping
+    }
+
+    fn record_ping_sent(&mut self) {
+        self.waiting_for_pong = true;
+        self.sent_pings = self.sent_pings.saturating_add(1);
+    }
+
+    fn record_expected_pong(&mut self, counter: u32, now: Instant, ping_delay: Duration) -> bool {
+        if counter != self.next_pong {
+            return false;
+        }
+        self.next_ping = self.next_ping.saturating_add(1);
+        self.next_pong = self.next_pong.saturating_add(1);
+        self.received_pongs = self.received_pongs.saturating_add(1);
+        self.waiting_for_pong = false;
+        self.next_ping_at = now + ping_delay;
+        true
+    }
+
+    fn is_complete(&self, rounds: u32) -> bool {
+        self.received_pongs >= rounds
+    }
 }
 
 fn run_active<T1, T2, C>(
     endpoint: &mut RastaEndpoint<T1, T2, C>,
     rounds: u32,
-    next_ping: &mut u32,
-    next_pong: &mut u32,
-    waiting_for_pong: &mut bool,
-    next_ping_at: &mut Instant,
+    state: &mut ActivePingPongState,
+    ping_delay: Duration,
 ) where
     T1: rasta_core::port::RastaTransport,
     T2: rasta_core::port::RastaTransport,
     C: rasta_core::time::MonotonicClock + rasta_core::time::ProtocolTimestampSource,
 {
-    if !*waiting_for_pong && *next_ping <= rounds && Instant::now() >= *next_ping_at {
-        send_message(
-            endpoint,
-            ApplicationMessage::Ping {
-                counter: *next_ping,
-            },
-        );
-        println!("Ping({}) sent", *next_ping);
-        *waiting_for_pong = true;
+    let now = Instant::now();
+    if state.should_send_ping(rounds, now) {
+        let counter = state.current_ping();
+        send_message(endpoint, ApplicationMessage::Ping { counter });
+        println!("Ping({counter}) sent");
+        state.record_ping_sent();
     }
 
     let mut buffer = [0u8; ApplicationMessage::MAX_ENCODED_LEN];
@@ -188,15 +245,10 @@ fn run_active<T1, T2, C>(
             Ok(length) => match ApplicationMessage::decode(&buffer[..length]) {
                 Ok(ApplicationMessage::Pong { counter }) => {
                     println!("Pong({counter}) received");
-                    if counter == *next_pong {
-                        *next_ping = next_ping.saturating_add(1);
-                        *next_pong = next_pong.saturating_add(1);
-                        *waiting_for_pong = false;
-                        *next_ping_at = Instant::now() + Duration::from_millis(250);
-                    } else {
+                    if !state.record_expected_pong(counter, Instant::now(), ping_delay) {
                         eprintln!(
                             "Unexpected Pong counter: expected {}, got {counter}",
-                            *next_pong
+                            state.next_pong
                         );
                     }
                 }
@@ -307,6 +359,7 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
     let mut endpoint = defaults(role, profile);
     let mut rounds = DEFAULT_ROUNDS;
     let mut run_seconds = DEFAULT_RUN_SECONDS;
+    let mut ping_delay_ms = default_ping_delay_ms(profile);
     let mut trace = false;
     let mut index = 3;
     while index < args.len() {
@@ -315,6 +368,7 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
                 index += 1;
                 profile = parse_profile(args.get(index).ok_or("missing option value")?)?;
                 endpoint = defaults(role, profile);
+                ping_delay_ms = default_ping_delay_ms(profile);
                 index += 1;
             }
             "--rounds" => {
@@ -325,6 +379,12 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
             "--run-seconds" => {
                 index += 1;
                 run_seconds = parse_run_seconds(args.get(index).ok_or("missing option value")?)?;
+                index += 1;
+            }
+            "--ping-delay-ms" => {
+                index += 1;
+                ping_delay_ms =
+                    parse_ping_delay_ms(args.get(index).ok_or("missing option value")?)?;
                 index += 1;
             }
             "--trace" | "--trace-wire" => {
@@ -373,6 +433,7 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
         remote_id: endpoint.remote_id,
         rounds,
         run_seconds,
+        ping_delay_ms,
         trace,
     })
 }
@@ -463,13 +524,32 @@ fn parse_run_seconds(value: &str) -> Result<u64, &'static str> {
     Ok(seconds)
 }
 
+fn default_ping_delay_ms(profile: RuntimeProfile) -> u64 {
+    match profile {
+        RuntimeProfile::Academic | RuntimeProfile::LibrastaLocal => DEFAULT_PING_DELAY_MS,
+        RuntimeProfile::SbbLocal => SBB_LOCAL_PING_DELAY_MS,
+    }
+}
+
+fn parse_ping_delay_ms(value: &str) -> Result<u64, &'static str> {
+    let delay = value.parse::<u64>().map_err(|_| "invalid ping delay ms")?;
+    if delay > MAX_PING_DELAY_MS {
+        return Err("invalid ping delay ms");
+    }
+    Ok(delay)
+}
+
 fn parse_port(value: &str) -> Result<u16, &'static str> {
     value.parse::<u16>().map_err(|_| "invalid port")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_ROUNDS, Role, RuntimeProfile, parse_settings};
+    use super::{
+        ActivePingPongState, DEFAULT_PING_DELAY_MS, DEFAULT_ROUNDS, Role, RuntimeProfile,
+        SBB_LOCAL_PING_DELAY_MS, parse_settings,
+    };
+    use std::time::{Duration, Instant};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
@@ -481,6 +561,7 @@ mod tests {
         assert_eq!(settings.role, Role::Active);
         assert_eq!(settings.profile, RuntimeProfile::Academic);
         assert_eq!(settings.rounds, DEFAULT_ROUNDS);
+        assert_eq!(settings.ping_delay_ms, DEFAULT_PING_DELAY_MS);
         assert_eq!(settings.local_addr_a, "0.0.0.0:5000");
         assert_eq!(settings.remote_addr_a, "127.0.0.1:5001");
         assert_eq!(settings.sender_id, 0x1234);
@@ -523,6 +604,7 @@ mod tests {
         .unwrap();
         assert_eq!(settings.role, Role::Active);
         assert_eq!(settings.profile, RuntimeProfile::SbbLocal);
+        assert_eq!(settings.ping_delay_ms, SBB_LOCAL_PING_DELAY_MS);
         assert_eq!(settings.local_addr_a, "0.0.0.0:7100");
         assert_eq!(settings.remote_addr_a, "127.0.0.1:7000");
         assert_eq!(settings.local_addr_b, "0.0.0.0:7101");
@@ -549,6 +631,49 @@ mod tests {
         assert_eq!(settings.remote_addr_b, "127.0.0.1:7101");
         assert_eq!(settings.sender_id, 0x62);
         assert_eq!(settings.remote_id, 0x61);
+        assert_eq!(settings.ping_delay_ms, SBB_LOCAL_PING_DELAY_MS);
+    }
+
+    #[test]
+    fn parses_sbb_local_ping_delay_default() {
+        let settings = parse_settings(&args(&[
+            "ping-pong-node",
+            "active",
+            "127.0.0.1",
+            "--profile",
+            "sbb-local",
+        ]))
+        .unwrap();
+        assert_eq!(settings.ping_delay_ms, SBB_LOCAL_PING_DELAY_MS);
+    }
+
+    #[test]
+    fn parses_explicit_ping_delay_ms() {
+        let settings = parse_settings(&args(&[
+            "ping-pong-node",
+            "active",
+            "127.0.0.1",
+            "--profile",
+            "sbb-local",
+            "--ping-delay-ms",
+            "450",
+        ]))
+        .unwrap();
+        assert_eq!(settings.ping_delay_ms, 450);
+    }
+
+    #[test]
+    fn rejects_invalid_ping_delay_ms() {
+        assert_eq!(
+            parse_settings(&args(&[
+                "ping-pong-node",
+                "active",
+                "127.0.0.1",
+                "--ping-delay-ms",
+                "not-a-number",
+            ])),
+            Err("invalid ping delay ms")
+        );
     }
 
     #[test]
@@ -589,5 +714,26 @@ mod tests {
         assert_eq!(settings.remote_addr_a, "127.0.0.1:8000");
         assert_eq!(settings.local_addr_b, "0.0.0.0:8101");
         assert_eq!(settings.remote_addr_b, "127.0.0.1:8001");
+    }
+
+    #[test]
+    fn active_ping_pong_state_machine_sends_next_ping_only_after_pong() {
+        let now = Instant::now();
+        let delay = Duration::from_millis(SBB_LOCAL_PING_DELAY_MS);
+        let mut state = ActivePingPongState::new(now);
+
+        assert!(state.should_send_ping(5, now));
+        assert_eq!(state.current_ping(), 1);
+
+        state.record_ping_sent();
+        assert!(!state.should_send_ping(5, now + delay));
+
+        assert!(!state.record_expected_pong(2, now, delay));
+        assert!(!state.should_send_ping(5, now + delay));
+
+        assert!(state.record_expected_pong(1, now, delay));
+        assert!(!state.should_send_ping(5, now + delay - Duration::from_millis(1)));
+        assert!(state.should_send_ping(5, now + delay));
+        assert_eq!(state.current_ping(), 2);
     }
 }

@@ -98,9 +98,24 @@ Evidence summary:
 - SBB passive sent `Pong(1)` and `Pong(2)`.
 - SBB passive summary: `received_pings=2 sent_pongs=2 success=true`.
 
+## Step 8N status
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: paced run pending live Kali evidence.
+- Docker: pending.
+
+Preparation summary:
+
+- `ping-pong-node --profile sbb-local` defaults to a `300 ms` inter-ping delay.
+- `--ping-delay-ms N` allows live-test override.
+- Academic and `librasta-local` profiles keep a `0 ms` default.
+- Rust active sends Ping `N+1` only after Pong `N` is decoded and the delay has elapsed.
+- Rust active prints `active summary: sent_pings=N received_pongs=M success=true/false`.
+
 ## Automation status
 Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
 
 ## Open points
 - Observe timestamp behavior live.
-- Stabilize Rust-to-SBB application Ping/Pong for five rounds before claiming five-round success.
+- Run the paced Rust-to-SBB application Ping/Pong test for five rounds before claiming five-round success.

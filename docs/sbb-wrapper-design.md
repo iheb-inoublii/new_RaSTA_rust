@@ -763,8 +763,34 @@ Status:
 
 This is not a five-round Rust-to-SBB Ping/Pong success claim.
 
-## Remaining Work After Step 8M
+## Step 8N Rust-To-SBB Ping/Pong Pacing
 
-1. Stabilize and capture Rust-to-SBB application Ping/Pong for five rounds.
+The five-round Rust-to-SBB Ping/Pong live run was unstable after the proven
+two-round result. Rust diagnostics showed channel supervision failure after SBB
+had received and answered two Ping messages.
+
+Step 8N adds active-side pacing to `apps/ping-pong-node`:
+
+- `--profile sbb-local` defaults to `--ping-delay-ms 300`.
+- Academic and `librasta-local` keep a fast `0 ms` default.
+- `--ping-delay-ms N` can override the delay for live tests.
+- Active mode sends Ping `N+1` only after Pong `N` has been decoded and the
+  delay has elapsed.
+- Active mode prints `active summary: sent_pings=N received_pongs=M success=true/false`.
+
+Status remains careful:
+
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: pending live Kali evidence after pacing.
+- Docker: pending.
+
+This does not change Rust protocol behavior or claim five-round Rust-to-SBB
+success.
+
+## Remaining Work After Step 8N
+
+1. Run and capture the paced Rust-to-SBB application Ping/Pong test for five rounds.
 2. Add Docker only after the non-Docker live path is stable.
-3. Do not claim broader Rust-to-SBB application interoperability beyond the captured two-round evidence.
+3. Do not claim broader Rust-to-SBB application interoperability beyond captured evidence.

@@ -274,6 +274,39 @@ Status:
 - Rust-to-SBB Ping/Pong 5 rounds: unstable / pending.
 - Docker: pending.
 
+## Step 8N: Rust-to-SBB 5-Round Pacing Preparation
+
+The five-round Rust-to-SBB Ping/Pong run remains pending. The previous
+five-round attempt was unstable after two Ping/Pong exchanges and Rust reported
+channel supervision diagnostics.
+
+Step 8N changes only the Rust `ping-pong-node` test driver behavior:
+
+- `--profile sbb-local` uses a `300 ms` default inter-ping delay.
+- `--ping-delay-ms N` can override that delay.
+- Academic and `librasta-local` keep a `0 ms` default.
+- Active mode sends the next Ping only after the previous Pong is decoded and
+  the delay has elapsed.
+- Active mode prints `active summary: sent_pings=N received_pongs=M success=true/false`.
+
+Suggested next Kali command for Rust active:
+
+```sh
+cargo run -p ping-pong-node -- active 127.0.0.1 \
+  --profile sbb-local \
+  --rounds 5 \
+  --trace-wire \
+  --run-seconds 30 \
+  --ping-delay-ms 300 \
+  --channel-0-local-port 7100 \
+  --channel-0-remote-port 7000 \
+  --channel-1-local-port 7101 \
+  --channel-1-remote-port 7001
+```
+
+Status: Rust-to-SBB 5-round Ping/Pong is pending until this paced run is
+verified live in Kali.
+
 ## Limitations
 
 This evidence proves Rust-to-SBB application Ping/Pong for two rounds only. It does not prove five-round Rust-to-SBB Ping/Pong, does not add Docker, and does not modify Rust protocol behavior or Rust applications.
