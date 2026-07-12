@@ -60,7 +60,7 @@ No Rust protocol behavior is changed. No Docker setup or Rust-to-SBB interoperab
 - SBB-to-SBB Ping/Pong: passed.
 - Rust-to-SBB connection establishment: passed.
 - Rust-to-SBB heartbeat exchange: passed.
-- Rust-to-SBB application Ping/Pong: pending.
+- Rust-to-SBB application Ping/Pong: pending at Step 8K; passed for five rounds in Step 8O.
 - Docker: pending.
 
 Evidence summary:
@@ -77,14 +77,14 @@ Evidence summary:
 - SBB-local ping-pong active defaults: Rust local `7100/7101`, SBB remote `7000/7001`, IDs `0x61 -> 0x62`.
 - SBB-local ping-pong passive defaults: Rust local `7000/7001`, remote `7100/7101`, IDs `0x62 -> 0x61`.
 - Explicit channel port overrides are available.
-- Rust-to-SBB Ping/Pong success: pending live Kali evidence.
+- Rust-to-SBB Ping/Pong success: pending at Step 8L; passed for five rounds in Step 8O.
 - Docker: pending.
 
 ## Step 8M status
 - SBB-to-SBB Ping/Pong 5 rounds: passed.
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
-- Rust-to-SBB Ping/Pong 5 rounds: unstable / pending.
+- Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
 - Docker: pending.
 
 Evidence summary:
@@ -102,7 +102,7 @@ Evidence summary:
 - SBB-to-SBB Ping/Pong 5 rounds: passed.
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
-- Rust-to-SBB Ping/Pong 5 rounds: paced run pending live Kali evidence.
+- Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
 - Docker: pending.
 
 Preparation summary:
@@ -113,9 +113,24 @@ Preparation summary:
 - Rust active sends Ping `N+1` only after Pong `N` is decoded and the delay has elapsed.
 - Rust active prints `active summary: sent_pings=N received_pongs=M success=true/false`.
 
+## Step 8O status
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker: pending.
+
+Evidence summary:
+
+- Rust active transitioned `Opening -> Up`.
+- Rust active sent `Ping(1)..Ping(5)` and received `Pong(1)..Pong(5)`.
+- Rust active completed five rounds and reported `sent_pings=5 received_pongs=5 success=true`.
+- SBB passive received `Ping(5)`, sent `Pong(5)`, reached its Ping/Pong success condition, and reported `received_pings=5 sent_pongs=5 success=true`.
+- `ChannelSupervisionFailure` diagnostics were observed during the run, but did not prevent completion.
+
 ## Automation status
 Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
 
 ## Open points
 - Observe timestamp behavior live.
-- Run the paced Rust-to-SBB application Ping/Pong test for five rounds before claiming five-round success.
+- Investigate the observed ChannelSupervisionFailure diagnostics.

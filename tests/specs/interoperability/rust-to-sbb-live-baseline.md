@@ -83,7 +83,7 @@ SBB evidence:
 - Rust-to-SBB connection establishment: passed.
 - Rust-to-SBB heartbeat exchange: passed.
 - Rust-to-SBB application Ping/Pong 2 rounds: passed.
-- Rust-to-SBB application Ping/Pong 5 rounds: paced run pending live evidence.
+- Rust-to-SBB application Ping/Pong 5 rounds: passed.
 - Docker: pending.
 
 ## Step 8L runnable Ping-Pong command
@@ -111,9 +111,8 @@ cargo run -p ping-pong-node -- active 127.0.0.1 \
   --channel-1-remote-port 7001
 ```
 
-Expected future evidence: Rust sends ordered `Ping(1)..Ping(5)`, SBB replies
-with ordered `Pong(1)..Pong(5)`, and both sides complete successfully. This is
-pending until captured in Kali.
+Expected evidence: Rust sends ordered `Ping(1)..Ping(5)`, SBB replies with
+ordered `Pong(1)..Pong(5)`, and both sides complete successfully.
 
 ## Step 8M actual Ping-Pong evidence
 SBB passive:
@@ -166,7 +165,7 @@ Status:
 - SBB-to-SBB Ping/Pong 5 rounds: passed.
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
-- Rust-to-SBB Ping/Pong 5 rounds: paced run pending live evidence.
+- Rust-to-SBB Ping/Pong 5 rounds: passed.
 - Docker: pending.
 
 ## Step 8N pacing preparation
@@ -180,7 +179,59 @@ protocol behavior:
   configured delay has elapsed.
 - Active prints `active summary: sent_pings=N received_pongs=M success=true/false`.
 
-This prepares the five-round run. It is not five-round success evidence.
+## Step 8O actual 5-round Ping-Pong evidence
+SBB passive:
+
+```sh
+./build/sbb-rasta-wrapper passive 127.0.0.1 \
+  --rounds 5 --trace --run-seconds 30 \
+  --channel0-local 7000 --channel0-remote 7100 \
+  --channel1-local 7001 --channel1-remote 7101
+```
+
+Rust active:
+
+```sh
+cargo run -p ping-pong-node -- active 127.0.0.1 \
+  --profile sbb-local \
+  --rounds 5 \
+  --trace-wire \
+  --run-seconds 30 \
+  --ping-delay-ms 300 \
+  --channel-0-local-port 7100 \
+  --channel-0-remote-port 7000 \
+  --channel-1-local-port 7101 \
+  --channel-1-remote-port 7001
+```
+
+Observed SBB result:
+
+- `received Ping(5)`
+- `sent Pong(5)`
+- `passive Ping/Pong success condition reached`
+- `passive summary: received_pings=5 sent_pongs=5 success=true`
+
+Observed Rust result:
+
+- state transition `Opening -> Up`
+- `Ping(1)` sent and `Pong(1)` received
+- `Ping(2)` sent and `Pong(2)` received
+- `Ping(3)` sent and `Pong(3)` received
+- `Ping(4)` sent and `Pong(4)` received
+- `Ping(5)` sent and `Pong(5)` received
+- `Completed 5 ping-pong rounds`
+- `active summary: sent_pings=5 received_pongs=5 success=true`
+
+`ChannelSupervisionFailure` diagnostics were observed during the run, but they
+did not prevent the five-round application exchange from completing.
+
+Status:
+
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker: pending.
 
 ## Evidence
 Kali Rust and SBB wrapper logs.
@@ -189,6 +240,5 @@ Kali Rust and SBB wrapper logs.
 Manual live test. Not yet automated.
 
 ## Open points
-- Verify the paced Rust-to-SBB application Ping/Pong run for five rounds.
+- Investigate the observed ChannelSupervisionFailure diagnostics.
 - Keep Docker pending until the non-Docker live path is stable.
-- Do not claim five-round Rust-to-SBB Ping/Pong until live evidence passes.
