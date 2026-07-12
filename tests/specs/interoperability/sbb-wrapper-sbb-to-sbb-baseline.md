@@ -220,6 +220,20 @@ Step 8J actual successful runtime evidence:
 - Active logged `active Ping/Pong success condition reached`.
 - Active summary: `sent_pings=5 received_pongs=5 success=true`.
 
+Step 8K Rust-to-SBB live baseline evidence:
+
+- SBB-to-SBB Ping/Pong remains passed.
+- Rust-to-SBB connection establishment passed.
+- Rust-to-SBB heartbeat exchange passed.
+- Rust-to-SBB application Ping/Pong remains pending.
+- Docker remains pending.
+- Rust active used `--profile sbb-local`, local ports `7100/7101`, and remote ports `7000/7001`.
+- Rust sent `6200` ConnectionRequest length `58` on both channels.
+- Rust received `6201` ConnectionResponse length `58`.
+- Rust transitioned `Opening -> Up`.
+- Rust and SBB exchanged `6220` Heartbeat frames length `44`.
+- SBB passive reached `state=Up`, received heartbeat `sr_type=0x184c`, sent heartbeat frames length `44`, and later observed `Closed after Up`.
+
 ## Postconditions
 
 - Rust protocol code remains unchanged.
@@ -245,4 +259,5 @@ Partially automated. Smoke tests are automated in CMake. The two-process baselin
 ## Open points
 
 - SBB-wrapper-to-SBB-wrapper Ping/Pong has passed.
-- Do not claim Rust-to-SBB interoperability until a live Rust/SBB run passes.
+- Rust-to-SBB connection and heartbeat have passed.
+- Do not claim full Rust-to-SBB application interoperability until application Ping/Pong passes.

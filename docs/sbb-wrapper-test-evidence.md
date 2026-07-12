@@ -123,6 +123,63 @@ active summary: sent_pings=5 received_pongs=5 success=true
 
 Interpretation: SBB-wrapper-to-SBB-wrapper Ping/Pong works for five ordered application rounds over an established SBB RaSTA connection. This is not Rust-to-SBB interoperability.
 
+## Step 8K: Rust-to-SBB Live Baseline
+
+Kali SBB passive command:
+
+```sh
+./build/sbb-rasta-wrapper passive 127.0.0.1 \
+  --rounds 5 --trace --run-seconds 30 \
+  --channel0-local 7000 --channel0-remote 7100 \
+  --channel1-local 7001 --channel1-remote 7101
+```
+
+Kali Rust active command:
+
+```sh
+cargo run -p rasta-node -- A 127.0.0.1 \
+  --profile sbb-local \
+  --trace-wire \
+  --run-seconds 30 \
+  --channel-0-local-port 7100 \
+  --channel-0-remote-port 7000 \
+  --channel-1-local-port 7101 \
+  --channel-1-remote-port 7001
+```
+
+Observed Rust evidence:
+
+- `Starting node A`
+- `Local ID: 97`
+- `Remote ID: 98`
+- `Profile: SbbLocal`
+- `Channel A: 0.0.0.0:7100 -> 127.0.0.1:7000`
+- `Channel B: 0.0.0.0:7101 -> 127.0.0.1:7001`
+- wire TX `6200` ConnectionRequest length `58` on both channels
+- wire RX `6201` ConnectionResponse length `58`
+- state transition `Opening -> Up`
+- wire TX/RX `6220` Heartbeat length `44`
+- wire RX `6216` Disconnect length `48`
+- state transition `Up -> Down`
+
+Observed SBB evidence:
+
+- channel 0 local `7000`, remote `7100`
+- channel 1 local `7001`, remote `7101`
+- `srapi_GetConnectionState state=Up`
+- received RedL frame `sr_type=0x184c(Heartbeat)`
+- UDP send channel 0 length `44`
+- UDP send channel 1 length `44`
+- later `Closed after Up`
+
+Status:
+
+- SBB-to-SBB Ping/Pong: passed.
+- Rust-to-SBB connection establishment: passed.
+- Rust-to-SBB heartbeat exchange: passed.
+- Rust-to-SBB application Ping/Pong: pending.
+- Docker: pending.
+
 ## Limitations
 
-This is wrapper-only evidence. It does not prove Rust-to-SBB interoperability, does not add Docker, and does not modify Rust protocol behavior or Rust applications.
+This evidence proves the first Rust-to-SBB live baseline for connection establishment and heartbeat exchange only. It does not prove Rust-to-SBB application data interoperability, does not add Docker, and does not modify Rust protocol behavior or Rust applications.

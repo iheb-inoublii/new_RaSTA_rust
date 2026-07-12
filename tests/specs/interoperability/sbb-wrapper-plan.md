@@ -56,9 +56,25 @@ No Rust protocol behavior is changed. No Docker setup or Rust-to-SBB interoperab
 - Active summary: `sent_pings=5 received_pongs=5 success=true`.
 - Rust-to-SBB interoperability: pending; no success claim is made.
 
+## Step 8K status
+- SBB-to-SBB Ping/Pong: passed.
+- Rust-to-SBB connection establishment: passed.
+- Rust-to-SBB heartbeat exchange: passed.
+- Rust-to-SBB application Ping/Pong: pending.
+- Docker: pending.
+
+Evidence summary:
+
+- Rust active sent `6200` ConnectionRequest length `58` on both channels.
+- Rust active received `6201` ConnectionResponse length `58`.
+- Rust active transitioned `Opening -> Up`.
+- Rust and SBB exchanged `6220` Heartbeat frames of length `44`.
+- SBB passive reached `state=Up` and later observed `Closed after Up`.
+- Full application data interoperability remains pending.
+
 ## Automation status
 Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
 
 ## Open points
 - Observe timestamp behavior live.
-- Run Rust-to-SBB live interoperability before claiming Rust/SBB compatibility.
+- Run Rust-to-SBB application Ping/Pong before claiming full Rust/SBB application compatibility.

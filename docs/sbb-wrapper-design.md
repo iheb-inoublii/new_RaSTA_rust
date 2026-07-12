@@ -687,7 +687,40 @@ Status:
 - SBB wrapper active/passive Ping/Pong: passed.
 - Rust-to-SBB live interoperability: pending.
 
-## Remaining Work After Step 8J
+## Step 8K Rust-To-SBB Live Baseline
 
-1. Run Rust active to SBB passive with captured traces only after SBB-to-SBB Ping/Pong is stable.
-2. Do not claim Rust-to-SBB interoperability until the live Rust/SBB run passes.
+The first live Rust-to-SBB baseline was run with SBB wrapper passive on ports
+`7000/7001` and Rust `rasta-node` active on ports `7100/7101` using
+`--profile sbb-local` and `--trace-wire`.
+
+Observed Rust-side evidence:
+
+- Rust sent `6200` ConnectionRequest frames with RedL length `58` on both channels.
+- Rust received `6201` ConnectionResponse length `58`.
+- Rust transitioned `Opening -> Up`.
+- Rust transmitted and received `6220` Heartbeat frames with RedL length `44`.
+- Rust received `6216` Disconnect length `48`.
+- Rust transitioned `Up -> Down`.
+
+Observed SBB-side evidence:
+
+- SBB passive reached `state=Up`.
+- SBB received RedL frame `sr_type=0x184c(Heartbeat)`.
+- SBB sent heartbeat UDP frames of length `44` on both channels.
+- SBB later observed `Closed after Up`.
+
+Status:
+
+- SBB-to-SBB Ping/Pong: passed.
+- Rust-to-SBB connection establishment: passed.
+- Rust-to-SBB heartbeat exchange: passed.
+- Rust-to-SBB application Ping/Pong: pending.
+- Docker: pending.
+
+This is not a full Rust-to-SBB application interoperability claim.
+
+## Remaining Work After Step 8K
+
+1. Run Rust-to-SBB application Ping/Pong with captured traces.
+2. Add Docker only after the non-Docker live path is stable.
+3. Do not claim full Rust-to-SBB application interoperability until application data Ping/Pong passes.
