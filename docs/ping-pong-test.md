@@ -71,8 +71,8 @@ cargo run -p ping-pong-node -- active 127.0.0.1 --rounds 10 --trace
 Rust-to-SBB connection establishment and heartbeat exchange have passed with
 `rasta-node --profile sbb-local`. Step 8L adds the same `--profile sbb-local`
 selection to `ping-pong-node` so the application Ping/Pong live test is
-runnable. Rust-to-SBB application Ping/Pong is not proven until Kali evidence is
-captured.
+runnable. Step 8M captured Rust-to-SBB Ping/Pong success for two rounds. A
+five-round Rust-to-SBB Ping/Pong run remains unstable / pending.
 
 Start SBB passive:
 
@@ -96,6 +96,9 @@ cargo run -p ping-pong-node -- active 127.0.0.1 \
   --channel-1-local-port 7101 \
   --channel-1-remote-port 7001
 ```
+
+For the proven Step 8M live run, use `--rounds 2` and `--run-seconds 20` on
+both sides. Five rounds remain pending until stable Kali evidence is captured.
 
 ## Expected Output
 
@@ -125,4 +128,4 @@ The payload format is intentionally fixed and compact so the same scenario can l
 - Rust to SBB
 
 Rust-to-SBB connection and heartbeat are proven. Rust-to-SBB application
-Ping/Pong remains pending.
+Ping/Pong is proven for two rounds; five rounds remain unstable / pending.

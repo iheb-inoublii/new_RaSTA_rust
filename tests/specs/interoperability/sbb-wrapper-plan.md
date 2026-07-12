@@ -80,9 +80,27 @@ Evidence summary:
 - Rust-to-SBB Ping/Pong success: pending live Kali evidence.
 - Docker: pending.
 
+## Step 8M status
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: unstable / pending.
+- Docker: pending.
+
+Evidence summary:
+
+- Rust active `ping-pong-node` used `--profile sbb-local`.
+- Rust transitioned `Opening -> Up`.
+- Rust sent `Ping(1)` and received `Pong(1)`.
+- Rust sent `Ping(2)` and received `Pong(2)`.
+- Rust completed two ping-pong rounds and started graceful disconnect.
+- SBB passive received `Ping(1)` and `Ping(2)`.
+- SBB passive sent `Pong(1)` and `Pong(2)`.
+- SBB passive summary: `received_pings=2 sent_pongs=2 success=true`.
+
 ## Automation status
 Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
 
 ## Open points
 - Observe timestamp behavior live.
-- Run Rust-to-SBB application Ping/Pong before claiming full Rust/SBB application compatibility.
+- Stabilize Rust-to-SBB application Ping/Pong for five rounds before claiming five-round success.

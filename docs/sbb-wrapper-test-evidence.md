@@ -215,6 +215,65 @@ Status:
 - Rust-to-SBB Ping/Pong: runnable.
 - Rust-to-SBB Ping/Pong success: pending live Kali evidence.
 
+## Step 8M: Rust-to-SBB Ping/Pong 2-Round Success
+
+Kali SBB passive command:
+
+```sh
+./build/sbb-rasta-wrapper passive 127.0.0.1 \
+  --rounds 2 --trace --run-seconds 20 \
+  --channel0-local 7000 --channel0-remote 7100 \
+  --channel1-local 7001 --channel1-remote 7101
+```
+
+Kali Rust active command:
+
+```sh
+cargo run -p ping-pong-node -- active 127.0.0.1 \
+  --profile sbb-local \
+  --rounds 2 \
+  --trace-wire \
+  --run-seconds 20 \
+  --channel-0-local-port 7100 \
+  --channel-0-remote-port 7000 \
+  --channel-1-local-port 7101 \
+  --channel-1-remote-port 7001
+```
+
+Observed Rust evidence:
+
+```text
+Starting ping-pong-node Active
+Profile: SbbLocal
+Channel A: 0.0.0.0:7100 -> 127.0.0.1:7000
+Channel B: 0.0.0.0:7101 -> 127.0.0.1:7001
+State transition: Opening -> Up
+Ping(1) sent
+Pong(1) received
+Ping(2) sent
+Pong(2) received
+Completed 2 ping-pong rounds
+Graceful disconnect...
+```
+
+Observed SBB evidence:
+
+```text
+received Ping(1)
+sent Pong(1)
+received Ping(2)
+sent Pong(2)
+passive summary: received_pings=2 sent_pongs=2 success=true
+```
+
+Status:
+
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: unstable / pending.
+- Docker: pending.
+
 ## Limitations
 
-This evidence proves the first Rust-to-SBB live baseline for connection establishment and heartbeat exchange only. It does not prove Rust-to-SBB application data interoperability, does not add Docker, and does not modify Rust protocol behavior or Rust applications.
+This evidence proves Rust-to-SBB application Ping/Pong for two rounds only. It does not prove five-round Rust-to-SBB Ping/Pong, does not add Docker, and does not modify Rust protocol behavior or Rust applications.

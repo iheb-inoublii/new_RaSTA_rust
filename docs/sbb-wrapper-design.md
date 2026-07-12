@@ -740,8 +740,31 @@ Status:
 - Rust-to-SBB Ping/Pong success: pending Kali evidence.
 - Docker: pending.
 
-## Remaining Work After Step 8L
+## Step 8M Rust-To-SBB Ping/Pong Result
 
-1. Run Rust-to-SBB application Ping/Pong with `ping-pong-node` and captured traces.
+The first Rust-to-SBB application Ping/Pong live run passed for two rounds:
+
+- Rust active used `ping-pong-node --profile sbb-local`.
+- Rust transitioned `Opening -> Up`.
+- Rust sent `Ping(1)` and received `Pong(1)`.
+- Rust sent `Ping(2)` and received `Pong(2)`.
+- Rust logged `Completed 2 ping-pong rounds` and `Graceful disconnect...`.
+- SBB passive received `Ping(1)` and `Ping(2)`.
+- SBB passive sent `Pong(1)` and `Pong(2)`.
+- SBB passive summary reported `received_pings=2 sent_pongs=2 success=true`.
+
+Status:
+
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: unstable / pending.
+- Docker: pending.
+
+This is not a five-round Rust-to-SBB Ping/Pong success claim.
+
+## Remaining Work After Step 8M
+
+1. Stabilize and capture Rust-to-SBB application Ping/Pong for five rounds.
 2. Add Docker only after the non-Docker live path is stable.
-3. Do not claim full Rust-to-SBB application interoperability until application data Ping/Pong passes.
+3. Do not claim broader Rust-to-SBB application interoperability beyond the captured two-round evidence.

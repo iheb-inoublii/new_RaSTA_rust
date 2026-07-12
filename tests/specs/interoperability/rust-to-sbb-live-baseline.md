@@ -82,7 +82,8 @@ SBB evidence:
 - SBB-to-SBB Ping/Pong: passed.
 - Rust-to-SBB connection establishment: passed.
 - Rust-to-SBB heartbeat exchange: passed.
-- Rust-to-SBB application Ping/Pong: pending.
+- Rust-to-SBB application Ping/Pong 2 rounds: passed.
+- Rust-to-SBB application Ping/Pong 5 rounds: unstable / pending.
 - Docker: pending.
 
 ## Step 8L runnable Ping-Pong command
@@ -113,6 +114,60 @@ Expected future evidence: Rust sends ordered `Ping(1)..Ping(5)`, SBB replies
 with ordered `Pong(1)..Pong(5)`, and both sides complete successfully. This is
 pending until captured in Kali.
 
+## Step 8M actual Ping-Pong evidence
+SBB passive:
+
+```sh
+./build/sbb-rasta-wrapper passive 127.0.0.1 \
+  --rounds 2 --trace --run-seconds 20 \
+  --channel0-local 7000 --channel0-remote 7100 \
+  --channel1-local 7001 --channel1-remote 7101
+```
+
+Rust active:
+
+```sh
+cargo run -p ping-pong-node -- active 127.0.0.1 \
+  --profile sbb-local \
+  --rounds 2 \
+  --trace-wire \
+  --run-seconds 20 \
+  --channel-0-local-port 7100 \
+  --channel-0-remote-port 7000 \
+  --channel-1-local-port 7101 \
+  --channel-1-remote-port 7001
+```
+
+Observed Rust result:
+
+- `Starting ping-pong-node Active`
+- `Profile: SbbLocal`
+- channel A `0.0.0.0:7100 -> 127.0.0.1:7000`
+- channel B `0.0.0.0:7101 -> 127.0.0.1:7001`
+- state transition `Opening -> Up`
+- `Ping(1) sent`
+- `Pong(1) received`
+- `Ping(2) sent`
+- `Pong(2) received`
+- `Completed 2 ping-pong rounds`
+- `Graceful disconnect...`
+
+Observed SBB result:
+
+- `received Ping(1)`
+- `sent Pong(1)`
+- `received Ping(2)`
+- `sent Pong(2)`
+- `passive summary: received_pings=2 sent_pongs=2 success=true`
+
+Status:
+
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: unstable / pending.
+- Docker: pending.
+
 ## Evidence
 Kali Rust and SBB wrapper logs.
 
@@ -120,6 +175,6 @@ Kali Rust and SBB wrapper logs.
 Manual live test. Not yet automated.
 
 ## Open points
-- Verify Rust-to-SBB application Ping/Pong.
+- Stabilize and verify Rust-to-SBB application Ping/Pong for five rounds.
 - Keep Docker pending until the non-Docker live path is stable.
-- Do not claim full Rust-to-SBB application interoperability until application data Ping/Pong passes.
+- Do not claim five-round Rust-to-SBB Ping/Pong until live evidence passes.
