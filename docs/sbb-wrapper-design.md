@@ -719,8 +719,29 @@ Status:
 
 This is not a full Rust-to-SBB application interoperability claim.
 
-## Remaining Work After Step 8K
+## Step 8L Rust Ping-Pong Node Preparation
 
-1. Run Rust-to-SBB application Ping/Pong with captured traces.
+`apps/ping-pong-node` now accepts `--profile sbb-local` and the same explicit
+channel port override flags used for the Rust/SBB live baseline:
+
+- `--channel-0-local-port`
+- `--channel-0-remote-port`
+- `--channel-1-local-port`
+- `--channel-1-remote-port`
+
+The Rust active defaults for `--profile sbb-local` are local ports `7100/7101`,
+remote ports `7000/7001`, sender ID `0x61`, and receiver ID `0x62`. Passive
+defaults are the reversed port and ID mapping.
+
+Status:
+
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong: runnable with `ping-pong-node --profile sbb-local`.
+- Rust-to-SBB Ping/Pong success: pending Kali evidence.
+- Docker: pending.
+
+## Remaining Work After Step 8L
+
+1. Run Rust-to-SBB application Ping/Pong with `ping-pong-node` and captured traces.
 2. Add Docker only after the non-Docker live path is stable.
 3. Do not claim full Rust-to-SBB application interoperability until application data Ping/Pong passes.

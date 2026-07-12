@@ -72,6 +72,14 @@ Evidence summary:
 - SBB passive reached `state=Up` and later observed `Closed after Up`.
 - Full application data interoperability remains pending.
 
+## Step 8L status
+- `ping-pong-node --profile sbb-local`: runnable.
+- SBB-local ping-pong active defaults: Rust local `7100/7101`, SBB remote `7000/7001`, IDs `0x61 -> 0x62`.
+- SBB-local ping-pong passive defaults: Rust local `7000/7001`, remote `7100/7101`, IDs `0x62 -> 0x61`.
+- Explicit channel port overrides are available.
+- Rust-to-SBB Ping/Pong success: pending live Kali evidence.
+- Docker: pending.
+
 ## Automation status
 Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
 

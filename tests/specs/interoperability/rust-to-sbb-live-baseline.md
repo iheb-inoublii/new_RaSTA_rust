@@ -85,6 +85,34 @@ SBB evidence:
 - Rust-to-SBB application Ping/Pong: pending.
 - Docker: pending.
 
+## Step 8L runnable Ping-Pong command
+SBB passive:
+
+```sh
+./build/sbb-rasta-wrapper passive 127.0.0.1 \
+  --rounds 5 --trace --run-seconds 30 \
+  --channel0-local 7000 --channel0-remote 7100 \
+  --channel1-local 7001 --channel1-remote 7101
+```
+
+Rust active:
+
+```sh
+cargo run -p ping-pong-node -- active 127.0.0.1 \
+  --profile sbb-local \
+  --rounds 5 \
+  --trace-wire \
+  --run-seconds 30 \
+  --channel-0-local-port 7100 \
+  --channel-0-remote-port 7000 \
+  --channel-1-local-port 7101 \
+  --channel-1-remote-port 7001
+```
+
+Expected future evidence: Rust sends ordered `Ping(1)..Ping(5)`, SBB replies
+with ordered `Pong(1)..Pong(5)`, and both sides complete successfully. This is
+pending until captured in Kali.
+
 ## Evidence
 Kali Rust and SBB wrapper logs.
 

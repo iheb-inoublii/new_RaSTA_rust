@@ -66,6 +66,37 @@ cargo run -p ping-pong-node -- passive 127.0.0.1 --rounds 10 --trace
 cargo run -p ping-pong-node -- active 127.0.0.1 --rounds 10 --trace
 ```
 
+## Rust-to-SBB Ping-Pong Preparation
+
+Rust-to-SBB connection establishment and heartbeat exchange have passed with
+`rasta-node --profile sbb-local`. Step 8L adds the same `--profile sbb-local`
+selection to `ping-pong-node` so the application Ping/Pong live test is
+runnable. Rust-to-SBB application Ping/Pong is not proven until Kali evidence is
+captured.
+
+Start SBB passive:
+
+```sh
+./build/sbb-rasta-wrapper passive 127.0.0.1 \
+  --rounds 5 --trace --run-seconds 30 \
+  --channel0-local 7000 --channel0-remote 7100 \
+  --channel1-local 7001 --channel1-remote 7101
+```
+
+Start Rust active `ping-pong-node`:
+
+```sh
+cargo run -p ping-pong-node -- active 127.0.0.1 \
+  --profile sbb-local \
+  --rounds 5 \
+  --trace-wire \
+  --run-seconds 30 \
+  --channel-0-local-port 7100 \
+  --channel-0-remote-port 7000 \
+  --channel-1-local-port 7101 \
+  --channel-1-remote-port 7001
+```
+
 ## Expected Output
 
 The active node logs:
@@ -93,4 +124,5 @@ The payload format is intentionally fixed and compact so the same scenario can l
 - Rust to librasta
 - Rust to SBB
 
-This step does not implement those interoperability tests yet.
+Rust-to-SBB connection and heartbeat are proven. Rust-to-SBB application
+Ping/Pong remains pending.

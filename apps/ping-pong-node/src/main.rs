@@ -22,6 +22,7 @@ enum Role {
 enum RuntimeProfile {
     Academic,
     LibrastaLocal,
+    SbbLocal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,7 +57,7 @@ fn main() {
         Ok(settings) => settings,
         Err("missing arguments") => {
             println!(
-                "Usage: {} <active|passive> <remote_ip> [--rounds N] [--run-seconds N] [--profile academic|librasta-local] [--trace|--trace-wire]",
+                "Usage: {} <active|passive> <remote_ip> [--rounds N] [--run-seconds N] [--profile academic|librasta-local|sbb-local] [--trace|--trace-wire] [channel port overrides]",
                 args[0]
             );
             return;
@@ -266,12 +267,16 @@ fn build_endpoint(
     let profile = match settings.profile {
         RuntimeProfile::Academic => RastaProfile::academic_default()?,
         RuntimeProfile::LibrastaLocal => RastaProfile::librasta_local()?,
+        RuntimeProfile::SbbLocal => RastaProfile::sbb_local()?,
     };
     let config = config_from_profile(
         settings.sender_id,
         settings.remote_id,
         profile,
-        settings.profile == RuntimeProfile::LibrastaLocal,
+        matches!(
+            settings.profile,
+            RuntimeProfile::LibrastaLocal | RuntimeProfile::SbbLocal
+        ),
     )?;
     RastaEndpoint::from_config(transport_a, transport_b, StdClock::new(), config)
 }
@@ -326,8 +331,35 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
                 trace = true;
                 index += 1;
             }
+            "--channel-0-local-port" => {
+                index += 1;
+                endpoint.channel_0_local_port =
+                    parse_port(args.get(index).ok_or("missing option value")?)?;
+                index += 1;
+            }
+            "--channel-0-remote-port" => {
+                index += 1;
+                endpoint.channel_0_remote_port =
+                    parse_port(args.get(index).ok_or("missing option value")?)?;
+                index += 1;
+            }
+            "--channel-1-local-port" => {
+                index += 1;
+                endpoint.channel_1_local_port =
+                    parse_port(args.get(index).ok_or("missing option value")?)?;
+                index += 1;
+            }
+            "--channel-1-remote-port" => {
+                index += 1;
+                endpoint.channel_1_remote_port =
+                    parse_port(args.get(index).ok_or("missing option value")?)?;
+                index += 1;
+            }
             _ => return Err("invalid option"),
         }
+    }
+    if endpoint.channel_0_local_port == endpoint.channel_1_local_port {
+        return Err("duplicate local ports");
     }
     Ok(Settings {
         role,
@@ -379,6 +411,22 @@ fn defaults(role: Role, profile: RuntimeProfile) -> EndpointDefaults {
             sender_id: 0x61,
             remote_id: 0x60,
         },
+        (Role::Active, RuntimeProfile::SbbLocal) => EndpointDefaults {
+            channel_0_local_port: 7100,
+            channel_0_remote_port: 7000,
+            channel_1_local_port: 7101,
+            channel_1_remote_port: 7001,
+            sender_id: 0x61,
+            remote_id: 0x62,
+        },
+        (Role::Passive, RuntimeProfile::SbbLocal) => EndpointDefaults {
+            channel_0_local_port: 7000,
+            channel_0_remote_port: 7100,
+            channel_1_local_port: 7001,
+            channel_1_remote_port: 7101,
+            sender_id: 0x62,
+            remote_id: 0x61,
+        },
     }
 }
 
@@ -386,6 +434,7 @@ fn parse_profile(value: &str) -> Result<RuntimeProfile, &'static str> {
     match value {
         "academic" => Ok(RuntimeProfile::Academic),
         "librasta-local" => Ok(RuntimeProfile::LibrastaLocal),
+        "sbb-local" => Ok(RuntimeProfile::SbbLocal),
         _ => Err("invalid profile"),
     }
 }
@@ -412,6 +461,10 @@ fn parse_run_seconds(value: &str) -> Result<u64, &'static str> {
         return Err("invalid run seconds");
     }
     Ok(seconds)
+}
+
+fn parse_port(value: &str) -> Result<u16, &'static str> {
+    value.parse::<u16>().map_err(|_| "invalid port")
 }
 
 #[cfg(test)]
@@ -456,5 +509,85 @@ mod tests {
         assert!(settings.trace);
         assert_eq!(settings.local_addr_a, "0.0.0.0:8888");
         assert_eq!(settings.remote_addr_a, "127.0.0.1:9998");
+    }
+
+    #[test]
+    fn parses_active_sbb_local_defaults() {
+        let settings = parse_settings(&args(&[
+            "ping-pong-node",
+            "active",
+            "127.0.0.1",
+            "--profile",
+            "sbb-local",
+        ]))
+        .unwrap();
+        assert_eq!(settings.role, Role::Active);
+        assert_eq!(settings.profile, RuntimeProfile::SbbLocal);
+        assert_eq!(settings.local_addr_a, "0.0.0.0:7100");
+        assert_eq!(settings.remote_addr_a, "127.0.0.1:7000");
+        assert_eq!(settings.local_addr_b, "0.0.0.0:7101");
+        assert_eq!(settings.remote_addr_b, "127.0.0.1:7001");
+        assert_eq!(settings.sender_id, 0x61);
+        assert_eq!(settings.remote_id, 0x62);
+    }
+
+    #[test]
+    fn parses_passive_sbb_local_defaults() {
+        let settings = parse_settings(&args(&[
+            "ping-pong-node",
+            "passive",
+            "127.0.0.1",
+            "--profile",
+            "sbb-local",
+        ]))
+        .unwrap();
+        assert_eq!(settings.role, Role::Passive);
+        assert_eq!(settings.profile, RuntimeProfile::SbbLocal);
+        assert_eq!(settings.local_addr_a, "0.0.0.0:7000");
+        assert_eq!(settings.remote_addr_a, "127.0.0.1:7100");
+        assert_eq!(settings.local_addr_b, "0.0.0.0:7001");
+        assert_eq!(settings.remote_addr_b, "127.0.0.1:7101");
+        assert_eq!(settings.sender_id, 0x62);
+        assert_eq!(settings.remote_id, 0x61);
+    }
+
+    #[test]
+    fn rejects_duplicate_local_ports() {
+        assert_eq!(
+            parse_settings(&args(&[
+                "ping-pong-node",
+                "active",
+                "127.0.0.1",
+                "--channel-0-local-port",
+                "9000",
+                "--channel-1-local-port",
+                "9000",
+            ])),
+            Err("duplicate local ports")
+        );
+    }
+
+    #[test]
+    fn parses_explicit_channel_port_overrides() {
+        let settings = parse_settings(&args(&[
+            "ping-pong-node",
+            "active",
+            "127.0.0.1",
+            "--profile",
+            "sbb-local",
+            "--channel-0-local-port",
+            "8100",
+            "--channel-0-remote-port",
+            "8000",
+            "--channel-1-local-port",
+            "8101",
+            "--channel-1-remote-port",
+            "8001",
+        ]))
+        .unwrap();
+        assert_eq!(settings.local_addr_a, "0.0.0.0:8100");
+        assert_eq!(settings.remote_addr_a, "127.0.0.1:8000");
+        assert_eq!(settings.local_addr_b, "0.0.0.0:8101");
+        assert_eq!(settings.remote_addr_b, "127.0.0.1:8001");
     }
 }
