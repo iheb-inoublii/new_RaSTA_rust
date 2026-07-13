@@ -46,13 +46,91 @@ No Rust protocol behavior is changed. No Docker setup or Rust-to-SBB interoperab
 - Previous gap: passive stopped after `Up` and heartbeat, so active Ping messages were not answered with Pong replies.
 - Runtime change: passive remains alive after `Up`, decodes Ping counters, sends matching Pong counters, and exits successfully only after all requested rounds are answered.
 - Active runtime change: active waits for all expected Pong counters before reporting success.
-- Live SBB active/passive Ping/Pong run: pending Kali verification after rebuild.
 - Rust-to-SBB interoperability: pending; no success claim is made.
+
+## Step 8J status
+- SBB-to-SBB Ping/Pong: passed.
+- Passive received `Ping(1)..Ping(5)` and sent `Pong(1)..Pong(5)`.
+- Passive summary: `received_pings=5 sent_pongs=5 success=true`.
+- Active received `Pong(1)..Pong(5)`.
+- Active summary: `sent_pings=5 received_pongs=5 success=true`.
+- Rust-to-SBB interoperability: pending; no success claim is made.
+
+## Step 8K status
+- SBB-to-SBB Ping/Pong: passed.
+- Rust-to-SBB connection establishment: passed.
+- Rust-to-SBB heartbeat exchange: passed.
+- Rust-to-SBB application Ping/Pong: pending at Step 8K; passed for five rounds in Step 8O.
+- Docker: pending.
+
+Evidence summary:
+
+- Rust active sent `6200` ConnectionRequest length `58` on both channels.
+- Rust active received `6201` ConnectionResponse length `58`.
+- Rust active transitioned `Opening -> Up`.
+- Rust and SBB exchanged `6220` Heartbeat frames of length `44`.
+- SBB passive reached `state=Up` and later observed `Closed after Up`.
+- Full application data interoperability remains pending.
+
+## Step 8L status
+- `ping-pong-node --profile sbb-local`: runnable.
+- SBB-local ping-pong active defaults: Rust local `7100/7101`, SBB remote `7000/7001`, IDs `0x61 -> 0x62`.
+- SBB-local ping-pong passive defaults: Rust local `7000/7001`, remote `7100/7101`, IDs `0x62 -> 0x61`.
+- Explicit channel port overrides are available.
+- Rust-to-SBB Ping/Pong success: pending at Step 8L; passed for five rounds in Step 8O.
+- Docker: pending.
+
+## Step 8M status
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
+- Docker: pending.
+
+Evidence summary:
+
+- Rust active `ping-pong-node` used `--profile sbb-local`.
+- Rust transitioned `Opening -> Up`.
+- Rust sent `Ping(1)` and received `Pong(1)`.
+- Rust sent `Ping(2)` and received `Pong(2)`.
+- Rust completed two ping-pong rounds and started graceful disconnect.
+- SBB passive received `Ping(1)` and `Ping(2)`.
+- SBB passive sent `Pong(1)` and `Pong(2)`.
+- SBB passive summary: `received_pings=2 sent_pongs=2 success=true`.
+
+## Step 8N status
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
+- Docker: pending.
+
+Preparation summary:
+
+- `ping-pong-node --profile sbb-local` defaults to a `300 ms` inter-ping delay.
+- `--ping-delay-ms N` allows live-test override.
+- Academic and `librasta-local` profiles keep a `0 ms` default.
+- Rust active sends Ping `N+1` only after Pong `N` is decoded and the delay has elapsed.
+- Rust active prints `active summary: sent_pings=N received_pongs=M success=true/false`.
+
+## Step 8O status
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker: pending.
+
+Evidence summary:
+
+- Rust active transitioned `Opening -> Up`.
+- Rust active sent `Ping(1)..Ping(5)` and received `Pong(1)..Pong(5)`.
+- Rust active completed five rounds and reported `sent_pings=5 received_pongs=5 success=true`.
+- SBB passive received `Ping(5)`, sent `Pong(5)`, reached its Ping/Pong success condition, and reported `received_pings=5 sent_pongs=5 success=true`.
+- `ChannelSupervisionFailure` diagnostics were observed during the run, but did not prevent completion.
 
 ## Automation status
 Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
 
 ## Open points
-- Verify passive/active Ping/Pong runtime in Kali.
 - Observe timestamp behavior live.
-- Capture packet lengths before claiming Rust-to-SBB compatibility.
+- Investigate the observed ChannelSupervisionFailure diagnostics.

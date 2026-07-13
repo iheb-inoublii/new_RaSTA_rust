@@ -672,8 +672,164 @@ data, not a protocol PDU change.
 This remains SBB-wrapper-only behavior. It does not modify Rust protocol code,
 Rust applications, Docker, or Rust-to-SBB interoperability status.
 
-## Remaining Work After Step 8I
+## Step 8J SBB-To-SBB Ping/Pong Result
 
-1. Verify in Kali that Step 8I active/passive Ping/Pong completes all requested rounds.
-2. Run Rust active to SBB passive with captured traces only after SBB-to-SBB Ping/Pong is stable.
-3. Do not claim Rust-to-SBB interoperability until the live Rust/SBB run passes.
+The Kali two-process SBB wrapper runtime passed for five application rounds:
+
+- Passive received `Ping(1)..Ping(5)`.
+- Passive sent `Pong(1)..Pong(5)`.
+- Passive summary reported `received_pings=5 sent_pongs=5 success=true`.
+- Active received `Pong(1)..Pong(5)`.
+- Active summary reported `sent_pings=5 received_pongs=5 success=true`.
+
+Status:
+
+- SBB wrapper active/passive Ping/Pong: passed.
+- Rust-to-SBB live interoperability: pending.
+
+## Step 8K Rust-To-SBB Live Baseline
+
+The first live Rust-to-SBB baseline was run with SBB wrapper passive on ports
+`7000/7001` and Rust `rasta-node` active on ports `7100/7101` using
+`--profile sbb-local` and `--trace-wire`.
+
+Observed Rust-side evidence:
+
+- Rust sent `6200` ConnectionRequest frames with RedL length `58` on both channels.
+- Rust received `6201` ConnectionResponse length `58`.
+- Rust transitioned `Opening -> Up`.
+- Rust transmitted and received `6220` Heartbeat frames with RedL length `44`.
+- Rust received `6216` Disconnect length `48`.
+- Rust transitioned `Up -> Down`.
+
+Observed SBB-side evidence:
+
+- SBB passive reached `state=Up`.
+- SBB received RedL frame `sr_type=0x184c(Heartbeat)`.
+- SBB sent heartbeat UDP frames of length `44` on both channels.
+- SBB later observed `Closed after Up`.
+
+Status:
+
+- SBB-to-SBB Ping/Pong: passed.
+- Rust-to-SBB connection establishment: passed.
+- Rust-to-SBB heartbeat exchange: passed.
+- Rust-to-SBB application Ping/Pong: pending at Step 8K; passed for five rounds in Step 8O.
+- Docker: pending at this step; passed in Step 9B.
+
+This is not a full Rust-to-SBB application interoperability claim.
+
+## Step 8L Rust Ping-Pong Node Preparation
+
+`apps/ping-pong-node` now accepts `--profile sbb-local` and the same explicit
+channel port override flags used for the Rust/SBB live baseline:
+
+- `--channel-0-local-port`
+- `--channel-0-remote-port`
+- `--channel-1-local-port`
+- `--channel-1-remote-port`
+
+The Rust active defaults for `--profile sbb-local` are local ports `7100/7101`,
+remote ports `7000/7001`, sender ID `0x61`, and receiver ID `0x62`. Passive
+defaults are the reversed port and ID mapping.
+
+Status:
+
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong: runnable with `ping-pong-node --profile sbb-local`.
+- Rust-to-SBB Ping/Pong success: pending at Step 8L; passed for five rounds in Step 8O.
+- Docker: pending at this step; passed in Step 9B.
+
+## Step 8M Rust-To-SBB Ping/Pong Result
+
+The first Rust-to-SBB application Ping/Pong live run passed for two rounds:
+
+- Rust active used `ping-pong-node --profile sbb-local`.
+- Rust transitioned `Opening -> Up`.
+- Rust sent `Ping(1)` and received `Pong(1)`.
+- Rust sent `Ping(2)` and received `Pong(2)`.
+- Rust logged `Completed 2 ping-pong rounds` and `Graceful disconnect...`.
+- SBB passive received `Ping(1)` and `Ping(2)`.
+- SBB passive sent `Pong(1)` and `Pong(2)`.
+- SBB passive summary reported `received_pings=2 sent_pongs=2 success=true`.
+
+Status:
+
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
+- Docker: pending at this step; passed in Step 9B.
+
+This is not a five-round Rust-to-SBB Ping/Pong success claim.
+
+## Step 8N Rust-To-SBB Ping/Pong Pacing
+
+The five-round Rust-to-SBB Ping/Pong live run was unstable after the proven
+two-round result. Rust diagnostics showed channel supervision failure after SBB
+had received and answered two Ping messages.
+
+Step 8N adds active-side pacing to `apps/ping-pong-node`:
+
+- `--profile sbb-local` defaults to `--ping-delay-ms 300`.
+- Academic and `librasta-local` keep a fast `0 ms` default.
+- `--ping-delay-ms N` can override the delay for live tests.
+- Active mode sends Ping `N+1` only after Pong `N` has been decoded and the
+  delay has elapsed.
+- Active mode prints `active summary: sent_pings=N received_pongs=M success=true/false`.
+
+Step 8O then verified the paced five-round live run in Kali.
+
+Observed result:
+
+- Rust transitioned `Opening -> Up`.
+- Rust sent `Ping(1)..Ping(5)` and received `Pong(1)..Pong(5)`.
+- Rust logged `Completed 5 ping-pong rounds`.
+- Rust summary reported `sent_pings=5 received_pongs=5 success=true`.
+- SBB passive received `Ping(5)`, sent `Pong(5)`, reached its Ping/Pong
+  success condition, and reported `received_pings=5 sent_pongs=5 success=true`.
+- `ChannelSupervisionFailure` diagnostics were observed during the run, but
+  they did not prevent completion.
+
+Status:
+
+- SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Rust-to-SBB handshake/heartbeat: passed.
+- Rust-to-SBB Ping/Pong 2 rounds: passed.
+- Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed in Step 9B.
+
+This does not change Rust protocol behavior.
+
+## Step 9B Docker/Podman Interop Result
+
+The Docker/Podman compose environment reproduced the Rust-to-SBB five-round
+Ping/Pong scenario:
+
+- `rust-test` passed with `cargo test --workspace --all-targets --all-features`.
+- `sbb-wrapper-build` passed with CMake configure/build and wrapper tests.
+- The live compose profile passed with SBB passive and Rust active.
+- SBB passive received `Ping(5)`, sent `Pong(5)`, and reported
+  `received_pings=5 sent_pongs=5 success=true`.
+- Rust active received `Pong(5)`, completed five rounds, and reported
+  `sent_pings=5 received_pongs=5 success=true`.
+
+An earlier Docker/Podman build hit a CMake path mismatch because the native
+`interop/sbb-wrapper/build` cache was reused inside `/workspace`. The workaround
+was `rm -rf interop/sbb-wrapper/build`. A later cleanup should add
+`.dockerignore` to exclude build artifacts permanently.
+
+Status:
+
+- Native SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Native Rust-to-SBB handshake/heartbeat: passed.
+- Native Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker/Podman Rust tests: passed.
+- Docker/Podman SBB wrapper build/tests: passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed.
+
+## Remaining Work After Step 9B
+
+1. Investigate the observed `ChannelSupervisionFailure` diagnostics so the live path is cleaner.
+2. Add `.dockerignore` so native build artifacts do not leak into Docker contexts.
+3. Keep broader interoperability claims limited to captured evidence.

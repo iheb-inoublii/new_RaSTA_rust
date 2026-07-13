@@ -207,6 +207,33 @@ Step 8I changes the application runtime after this baseline:
 - Active exits successfully only after receiving all expected Pong counters.
 - Runtime summaries report sent/received counts and `success=true/false`.
 
+Step 8J actual successful runtime evidence:
+
+- Command pair:
+  - `./build/sbb-rasta-wrapper passive 127.0.0.1 --rounds 5 --trace --run-seconds 30`
+  - `./build/sbb-rasta-wrapper active 127.0.0.1 --rounds 5 --trace --run-seconds 30`
+- Passive received `Ping(1)` through `Ping(5)`.
+- Passive sent `Pong(1)` through `Pong(5)`.
+- Passive logged `passive Ping/Pong success condition reached`.
+- Passive summary: `received_pings=5 sent_pongs=5 success=true`.
+- Active received `Pong(1)` through `Pong(5)`.
+- Active logged `active Ping/Pong success condition reached`.
+- Active summary: `sent_pings=5 received_pongs=5 success=true`.
+
+Step 8K Rust-to-SBB live baseline evidence:
+
+- SBB-to-SBB Ping/Pong remains passed.
+- Rust-to-SBB connection establishment passed.
+- Rust-to-SBB heartbeat exchange passed.
+- Rust-to-SBB application Ping/Pong remains pending.
+- Docker remains pending.
+- Rust active used `--profile sbb-local`, local ports `7100/7101`, and remote ports `7000/7001`.
+- Rust sent `6200` ConnectionRequest length `58` on both channels.
+- Rust received `6201` ConnectionResponse length `58`.
+- Rust transitioned `Opening -> Up`.
+- Rust and SBB exchanged `6220` Heartbeat frames length `44`.
+- SBB passive reached `state=Up`, received heartbeat `sr_type=0x184c`, sent heartbeat frames length `44`, and later observed `Closed after Up`.
+
 ## Postconditions
 
 - Rust protocol code remains unchanged.
@@ -231,5 +258,6 @@ Partially automated. Smoke tests are automated in CMake. The two-process baselin
 
 ## Open points
 
-- Verify in Kali that Step 8I active/passive Ping/Pong completes all requested rounds.
-- Do not attempt Rust-to-SBB until SBB-to-SBB Ping/Pong behavior is understood.
+- SBB-wrapper-to-SBB-wrapper Ping/Pong has passed.
+- Rust-to-SBB connection and heartbeat have passed.
+- Do not claim full Rust-to-SBB application interoperability until application Ping/Pong passes.
