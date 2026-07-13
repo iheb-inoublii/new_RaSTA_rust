@@ -65,16 +65,56 @@ export SBB_ROOT=/sbb-rasta-stack
 - Live Docker run reproduces the native Kali Rust-to-SBB five-round Ping/Pong result.
 
 ## Actual result
-Pending. Step 9A adds Docker files and documentation only.
+Passed in Step 9B.
+
+Docker/Podman Rust tests passed:
+
+```sh
+docker compose -f docker/interop/docker-compose.yml run --rm rust-test
+```
+
+Docker/Podman SBB wrapper build/tests passed:
+
+```sh
+docker compose -f docker/interop/docker-compose.yml run --rm sbb-wrapper-build
+```
+
+Docker/Podman live interop passed:
+
+```sh
+docker compose -f docker/interop/docker-compose.yml --profile live up --build
+```
+
+Observed live evidence:
+
+- `sbb-passive received Ping(5)`
+- `sbb-passive sent Pong(5)`
+- `passive Ping/Pong success condition reached`
+- `passive summary: received_pings=5 sent_pongs=5 success=true`
+- `rust-active Pong(5) received`
+- `rust-active Completed 5 ping-pong rounds`
+- `active summary: sent_pings=5 received_pongs=5 success=true`
+
+An earlier Docker/Podman build hit a CMake path mismatch because native
+`interop/sbb-wrapper/build` cache files were reused inside `/workspace`. The
+workaround used was:
+
+```sh
+rm -rf interop/sbb-wrapper/build
+```
+
+Permanent recommendation: add `.dockerignore` later to exclude build artifacts.
 
 ## Postconditions
 - Native Kali Rust-to-SBB 5-round Ping/Pong remains passed.
-- Docker reproduction remains pending until executed.
+- Docker/Podman Rust tests passed.
+- Docker/Podman SBB wrapper build/tests passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong passed.
 - Rust protocol behavior is unchanged.
 - SBB wrapper behavior is unchanged.
 
 ## Evidence
-Expected Docker evidence:
+Docker evidence:
 
 - `cargo test --workspace --all-targets --all-features` output from the Rust container.
 - CMake configure/build and `ctest` output from the SBB wrapper container.
@@ -82,9 +122,9 @@ Expected Docker evidence:
 - SBB passive log showing `passive summary: received_pings=5 sent_pongs=5 success=true`.
 
 ## Automation status
-Skeleton added. Docker validation is pending.
+Docker/Podman validation passed manually with compose.
 
 ## Open points
-- Execute the Docker compose live profile and capture logs.
-- Decide whether to add health checks or a more deterministic startup wrapper after the first Docker run.
+- Add `.dockerignore` to exclude native build artifacts.
+- Decide whether to add health checks or a more deterministic startup wrapper.
 - Keep native Windows/Kali workflow available.

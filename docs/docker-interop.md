@@ -6,7 +6,7 @@ SBB wrapper interop tests in a controlled environment.
 Status:
 
 - Native Kali Rust-to-SBB 5-round Ping/Pong: passed.
-- Docker reproduction: pending.
+- Docker/Podman reproduction: passed in Step 9B.
 
 The Docker setup does not change Rust protocol behavior, SBB wrapper behavior,
 or the native Windows/Kali workflow.
@@ -61,9 +61,9 @@ cmake --build interop/sbb-wrapper/build
 ctest --test-dir interop/sbb-wrapper/build --output-on-failure
 ```
 
-## Intended Live Rust-To-SBB Test
+## Docker/Podman Live Rust-To-SBB Test
 
-The intended Step 9A live test mirrors the successful native Kali run:
+The Step 9A live test mirrors the successful native Kali run:
 
 - SBB passive wrapper container
 - Rust active `ping-pong-node` container
@@ -95,10 +95,54 @@ Expected success evidence:
 - Rust prints `active summary: sent_pings=5 received_pongs=5 success=true`.
 - SBB passive prints `passive summary: received_pings=5 sent_pongs=5 success=true`.
 
-Do not mark Docker reproduction as passed until this command is executed and
-the logs are captured.
+## Step 9B Result
+
+The Docker/Podman environment was verified with:
+
+```sh
+docker compose -f docker/interop/docker-compose.yml run --rm rust-test
+docker compose -f docker/interop/docker-compose.yml run --rm sbb-wrapper-build
+docker compose -f docker/interop/docker-compose.yml --profile live up --build
+```
+
+Observed live evidence:
+
+```text
+sbb-passive received Ping(5)
+sbb-passive sent Pong(5)
+passive Ping/Pong success condition reached
+passive summary: received_pings=5 sent_pongs=5 success=true
+rust-active Pong(5) received
+rust-active Completed 5 ping-pong rounds
+active summary: sent_pings=5 received_pongs=5 success=true
+```
+
+Status:
+
+- Native SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Native Rust-to-SBB handshake/heartbeat: passed.
+- Native Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker/Podman Rust tests: passed.
+- Docker/Podman SBB wrapper build/tests: passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed.
+
+## Docker Build Cache Note
+
+An earlier Docker/Podman build hit a CMake path mismatch because the native
+`interop/sbb-wrapper/build` cache had been created outside the container and
+then bind-mounted at `/workspace`.
+
+The workaround used before rerunning the Docker/Podman flow was:
+
+```sh
+rm -rf interop/sbb-wrapper/build
+```
+
+Permanent recommendation: add a `.dockerignore` in a later cleanup step so
+native build artifacts are excluded from Docker build contexts and bind-mounted
+workflows.
 
 ## Notes
 
-The native Kali run remains the source of proven Step 8O evidence. Docker is
-only a reproducibility layer in Step 9A.
+The native Kali run remains the source of Step 8O evidence. Step 9B confirms
+the same Rust-to-SBB five-round Ping/Pong scenario in Docker/Podman.

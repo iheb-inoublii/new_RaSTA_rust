@@ -715,7 +715,7 @@ Status:
 - Rust-to-SBB connection establishment: passed.
 - Rust-to-SBB heartbeat exchange: passed.
 - Rust-to-SBB application Ping/Pong: pending at Step 8K; passed for five rounds in Step 8O.
-- Docker: pending.
+- Docker: pending at this step; passed in Step 9B.
 
 This is not a full Rust-to-SBB application interoperability claim.
 
@@ -738,7 +738,7 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong: runnable with `ping-pong-node --profile sbb-local`.
 - Rust-to-SBB Ping/Pong success: pending at Step 8L; passed for five rounds in Step 8O.
-- Docker: pending.
+- Docker: pending at this step; passed in Step 9B.
 
 ## Step 8M Rust-To-SBB Ping/Pong Result
 
@@ -759,7 +759,7 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
-- Docker: pending.
+- Docker: pending at this step; passed in Step 9B.
 
 This is not a five-round Rust-to-SBB Ping/Pong success claim.
 
@@ -797,12 +797,39 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed.
-- Docker: pending.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed in Step 9B.
 
 This does not change Rust protocol behavior.
 
-## Remaining Work After Step 8O
+## Step 9B Docker/Podman Interop Result
+
+The Docker/Podman compose environment reproduced the Rust-to-SBB five-round
+Ping/Pong scenario:
+
+- `rust-test` passed with `cargo test --workspace --all-targets --all-features`.
+- `sbb-wrapper-build` passed with CMake configure/build and wrapper tests.
+- The live compose profile passed with SBB passive and Rust active.
+- SBB passive received `Ping(5)`, sent `Pong(5)`, and reported
+  `received_pings=5 sent_pongs=5 success=true`.
+- Rust active received `Pong(5)`, completed five rounds, and reported
+  `sent_pings=5 received_pongs=5 success=true`.
+
+An earlier Docker/Podman build hit a CMake path mismatch because the native
+`interop/sbb-wrapper/build` cache was reused inside `/workspace`. The workaround
+was `rm -rf interop/sbb-wrapper/build`. A later cleanup should add
+`.dockerignore` to exclude build artifacts permanently.
+
+Status:
+
+- Native SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Native Rust-to-SBB handshake/heartbeat: passed.
+- Native Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker/Podman Rust tests: passed.
+- Docker/Podman SBB wrapper build/tests: passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed.
+
+## Remaining Work After Step 9B
 
 1. Investigate the observed `ChannelSupervisionFailure` diagnostics so the live path is cleaner.
-2. Add Docker only after the non-Docker live path remains stable.
+2. Add `.dockerignore` so native build artifacts do not leak into Docker contexts.
 3. Keep broader interoperability claims limited to captured evidence.

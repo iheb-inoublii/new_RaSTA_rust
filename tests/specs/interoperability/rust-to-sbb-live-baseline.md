@@ -84,7 +84,7 @@ SBB evidence:
 - Rust-to-SBB heartbeat exchange: passed.
 - Rust-to-SBB application Ping/Pong 2 rounds: passed.
 - Rust-to-SBB application Ping/Pong 5 rounds: passed.
-- Docker: pending.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed.
 
 ## Step 8L runnable Ping-Pong command
 SBB passive:
@@ -166,7 +166,50 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed.
-- Docker: pending.
+- Docker/Podman Rust-to-SBB Ping/Pong 5 rounds: passed in Step 9B.
+
+## Step 9B Docker/Podman evidence
+Docker/Podman Rust tests passed:
+
+```sh
+docker compose -f docker/interop/docker-compose.yml run --rm rust-test
+```
+
+Docker/Podman SBB wrapper build/tests passed:
+
+```sh
+docker compose -f docker/interop/docker-compose.yml run --rm sbb-wrapper-build
+```
+
+Docker/Podman live interop passed:
+
+```sh
+docker compose -f docker/interop/docker-compose.yml --profile live up --build
+```
+
+Observed live result:
+
+- `sbb-passive received Ping(5)`
+- `sbb-passive sent Pong(5)`
+- `passive Ping/Pong success condition reached`
+- `passive summary: received_pings=5 sent_pongs=5 success=true`
+- `rust-active Pong(5) received`
+- `rust-active Completed 5 ping-pong rounds`
+- `active summary: sent_pings=5 received_pongs=5 success=true`
+
+Earlier Docker/Podman build issue: native `interop/sbb-wrapper/build` cache
+caused a CMake path mismatch inside `/workspace`. The workaround was
+`rm -rf interop/sbb-wrapper/build`. Add `.dockerignore` later to exclude build
+artifacts.
+
+Status:
+
+- Native SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Native Rust-to-SBB handshake/heartbeat: passed.
+- Native Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker/Podman Rust tests: passed.
+- Docker/Podman SBB wrapper build/tests: passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed.
 
 ## Step 8N pacing preparation
 The first five-round Rust-to-SBB Ping/Pong attempt was unstable after two
@@ -231,7 +274,7 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed.
-- Docker: pending.
+- Docker: pending at this step; passed in Step 9B.
 
 ## Evidence
 Kali Rust and SBB wrapper logs.
@@ -241,4 +284,4 @@ Manual live test. Not yet automated.
 
 ## Open points
 - Investigate the observed ChannelSupervisionFailure diagnostics.
-- Keep Docker pending until the non-Docker live path is stable.
+- Add `.dockerignore` to exclude native build artifacts from Docker/Podman contexts.
