@@ -715,7 +715,7 @@ Status:
 - Rust-to-SBB connection establishment: passed.
 - Rust-to-SBB heartbeat exchange: passed.
 - Rust-to-SBB application Ping/Pong: pending at Step 8K; passed for five rounds in Step 8O.
-- Docker: pending at this step; passed in Step 9B.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 This is not a full Rust-to-SBB application interoperability claim.
 
@@ -738,7 +738,7 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong: runnable with `ping-pong-node --profile sbb-local`.
 - Rust-to-SBB Ping/Pong success: pending at Step 8L; passed for five rounds in Step 8O.
-- Docker: pending at this step; passed in Step 9B.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 ## Step 8M Rust-To-SBB Ping/Pong Result
 
@@ -759,7 +759,7 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
-- Docker: pending at this step; passed in Step 9B.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 This is not a five-round Rust-to-SBB Ping/Pong success claim.
 

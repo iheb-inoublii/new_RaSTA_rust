@@ -274,7 +274,7 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed.
-- Docker: pending at this step; passed in Step 9B.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 ## Evidence
 Kali Rust and SBB wrapper logs.

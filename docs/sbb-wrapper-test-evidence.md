@@ -178,7 +178,7 @@ Status:
 - Rust-to-SBB connection establishment: passed.
 - Rust-to-SBB heartbeat exchange: passed.
 - Rust-to-SBB application Ping/Pong: pending at Step 8K; passed for five rounds in Step 8O.
-- Docker: pending at this step; passed in Step 9B.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 ## Step 8L: Rust Ping-Pong Node Preparation
 
@@ -272,13 +272,13 @@ Status:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
-- Docker: pending at this step; passed in Step 9B.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 ## Step 8N: Rust-to-SBB 5-Round Pacing Preparation
 
-The five-round Rust-to-SBB Ping/Pong run remains pending. The previous
-five-round attempt was unstable after two Ping/Pong exchanges and Rust reported
-channel supervision diagnostics.
+At Step 8N, the five-round Rust-to-SBB Ping/Pong run remained pending. The
+previous five-round attempt was unstable after two Ping/Pong exchanges and Rust
+reported channel supervision diagnostics.
 
 Step 8N changes only the Rust `ping-pong-node` test driver behavior:
 
@@ -304,8 +304,8 @@ cargo run -p ping-pong-node -- active 127.0.0.1 \
   --channel-1-remote-port 7001
 ```
 
-Status: Rust-to-SBB 5-round Ping/Pong is pending until this paced run is
-verified live in Kali.
+Status after Step 8N: Rust-to-SBB 5-round Ping/Pong was pending until the
+paced run was verified live in Kali in Step 8O.
 
 ## Step 8O: Rust-to-SBB Ping/Pong 5-Round Success
 
