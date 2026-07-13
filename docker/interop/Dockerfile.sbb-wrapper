@@ -1,0 +1,18 @@
+FROM debian:bookworm
+
+ARG SBB_ROOT=/sbb-rasta-stack
+ENV SBB_ROOT=${SBB_ROOT}
+
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . /workspace
+
+CMD ["sh", "-c", "cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=${SBB_ROOT} && cmake --build interop/sbb-wrapper/build && ctest --test-dir interop/sbb-wrapper/build --output-on-failure"]

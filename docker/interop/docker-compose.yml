@@ -1,0 +1,97 @@
+services:
+  rust-test:
+    build:
+      context: ../..
+      dockerfile: docker/interop/Dockerfile.rust
+    command: cargo test --workspace --all-targets --all-features
+
+  rust-active:
+    build:
+      context: ../..
+      dockerfile: docker/interop/Dockerfile.rust
+    command: >
+      sh -c "sleep 5
+      && cargo run -p ping-pong-node -- active 172.28.0.20
+      --profile sbb-local
+      --rounds 5
+      --trace-wire
+      --run-seconds 30
+      --ping-delay-ms 300
+      --channel-0-local-port 7100
+      --channel-0-remote-port 7000
+      --channel-1-local-port 7101
+      --channel-1-remote-port 7001"
+    networks:
+      interop:
+        ipv4_address: 172.28.0.10
+    depends_on:
+      - sbb-passive
+    profiles:
+      - live
+
+  rust-passive:
+    build:
+      context: ../..
+      dockerfile: docker/interop/Dockerfile.rust
+    command: >
+      cargo run -p ping-pong-node -- passive 172.28.0.20
+      --profile sbb-local
+      --rounds 5
+      --trace-wire
+      --run-seconds 30
+      --ping-delay-ms 300
+      --channel-0-local-port 7000
+      --channel-0-remote-port 7100
+      --channel-1-local-port 7001
+      --channel-1-remote-port 7101
+    networks:
+      interop:
+        ipv4_address: 172.28.0.11
+    profiles:
+      - rust-rust
+
+  sbb-wrapper-build:
+    build:
+      context: ../..
+      dockerfile: docker/interop/Dockerfile.sbb-wrapper
+      args:
+        SBB_ROOT: ${SBB_ROOT:-/sbb-rasta-stack}
+    volumes:
+      - ../..:/workspace
+      - ${SBB_HOST_ROOT:-/tmp/sbb-rasta-stack}:${SBB_ROOT:-/sbb-rasta-stack}:ro
+    command: >
+      sh -c "cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=${SBB_ROOT:-/sbb-rasta-stack}
+      && cmake --build interop/sbb-wrapper/build
+      && ctest --test-dir interop/sbb-wrapper/build --output-on-failure"
+
+  sbb-passive:
+    build:
+      context: ../..
+      dockerfile: docker/interop/Dockerfile.sbb-wrapper
+      args:
+        SBB_ROOT: ${SBB_ROOT:-/sbb-rasta-stack}
+    volumes:
+      - ../..:/workspace
+      - ${SBB_HOST_ROOT:-/tmp/sbb-rasta-stack}:${SBB_ROOT:-/sbb-rasta-stack}:ro
+    command: >
+      sh -c "cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=${SBB_ROOT:-/sbb-rasta-stack}
+      && cmake --build interop/sbb-wrapper/build
+      && ./interop/sbb-wrapper/build/sbb-rasta-wrapper passive 172.28.0.10
+      --rounds 5
+      --trace
+      --run-seconds 30
+      --channel0-local 7000
+      --channel0-remote 7100
+      --channel1-local 7001
+      --channel1-remote 7101"
+    networks:
+      interop:
+        ipv4_address: 172.28.0.20
+    profiles:
+      - live
+
+networks:
+  interop:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
