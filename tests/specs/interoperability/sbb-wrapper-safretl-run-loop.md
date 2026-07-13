@@ -122,8 +122,8 @@ Run wrapper CLI smoke tests:
 
 - Rust protocol code remains unchanged.
 - No Rust `sbb-local` profile is added.
-- No Docker setup is added.
-- No Rust-to-SBB interoperability claim is made.
+- Docker/Podman setup was added later and passed in Step 9B.
+- Rust-to-SBB five-round Ping/Pong was claimed later from Step 8O/9B evidence.
 
 ## Evidence
 

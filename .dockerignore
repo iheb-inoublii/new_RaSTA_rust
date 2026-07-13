@@ -1,0 +1,6 @@
+target
+**/target
+interop/sbb-wrapper/build
+**/build
+.git
+*.log

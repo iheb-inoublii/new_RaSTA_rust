@@ -225,8 +225,8 @@ Step 8K Rust-to-SBB live baseline evidence:
 - SBB-to-SBB Ping/Pong remains passed.
 - Rust-to-SBB connection establishment passed.
 - Rust-to-SBB heartbeat exchange passed.
-- Rust-to-SBB application Ping/Pong remains pending.
-- Docker remains pending.
+- Rust-to-SBB application Ping/Pong later passed for five rounds in Step 8O.
+- Docker/Podman reproduction later passed in Step 9B.
 - Rust active used `--profile sbb-local`, local ports `7100/7101`, and remote ports `7000/7001`.
 - Rust sent `6200` ConnectionRequest length `58` on both channels.
 - Rust received `6201` ConnectionResponse length `58`.
@@ -237,9 +237,9 @@ Step 8K Rust-to-SBB live baseline evidence:
 ## Postconditions
 
 - Rust protocol code remains unchanged.
-- No Rust `sbb-local` profile is added.
-- No Docker setup is added.
-- No Rust-to-SBB interoperability claim is made.
+- Rust `sbb-local` is available as an opt-in profile from later preparation work.
+- Docker/Podman setup is available from Step 9A and passed in Step 9B.
+- Rust-to-SBB five-round Ping/Pong is claimed only from the later captured Step 8O/9B evidence.
 
 ## Evidence
 
@@ -260,4 +260,4 @@ Partially automated. Smoke tests are automated in CMake. The two-process baselin
 
 - SBB-wrapper-to-SBB-wrapper Ping/Pong has passed.
 - Rust-to-SBB connection and heartbeat have passed.
-- Do not claim full Rust-to-SBB application interoperability until application Ping/Pong passes.
+- Rust-to-SBB application Ping/Pong passed for five rounds in Step 8O and Docker/Podman reproduction passed in Step 9B.

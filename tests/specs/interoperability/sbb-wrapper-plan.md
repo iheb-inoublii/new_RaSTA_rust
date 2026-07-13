@@ -61,7 +61,7 @@ No Rust protocol behavior is changed. No Docker setup or Rust-to-SBB interoperab
 - Rust-to-SBB connection establishment: passed.
 - Rust-to-SBB heartbeat exchange: passed.
 - Rust-to-SBB application Ping/Pong: pending at Step 8K; passed for five rounds in Step 8O.
-- Docker: pending.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 Evidence summary:
 
@@ -70,7 +70,7 @@ Evidence summary:
 - Rust active transitioned `Opening -> Up`.
 - Rust and SBB exchanged `6220` Heartbeat frames of length `44`.
 - SBB passive reached `state=Up` and later observed `Closed after Up`.
-- Full application data interoperability remains pending.
+- Full application data interoperability was pending at Step 8K and passed for five rounds in Step 8O.
 
 ## Step 8L status
 - `ping-pong-node --profile sbb-local`: runnable.
@@ -78,14 +78,14 @@ Evidence summary:
 - SBB-local ping-pong passive defaults: Rust local `7000/7001`, remote `7100/7101`, IDs `0x62 -> 0x61`.
 - Explicit channel port overrides are available.
 - Rust-to-SBB Ping/Pong success: pending at Step 8L; passed for five rounds in Step 8O.
-- Docker: pending.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 ## Step 8M status
 - SBB-to-SBB Ping/Pong 5 rounds: passed.
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
-- Docker: pending.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 Evidence summary:
 
@@ -103,7 +103,7 @@ Evidence summary:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed in Step 8O.
-- Docker: pending.
+- Docker/Podman reproduction: passed later in Step 9B.
 
 Preparation summary:
 
@@ -118,7 +118,15 @@ Preparation summary:
 - Rust-to-SBB handshake/heartbeat: passed.
 - Rust-to-SBB Ping/Pong 2 rounds: passed.
 - Rust-to-SBB Ping/Pong 5 rounds: passed.
-- Docker: pending.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed in Step 9B.
+
+## Step 9B status
+- Native SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Native Rust-to-SBB handshake/heartbeat: passed.
+- Native Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker/Podman Rust tests: passed.
+- Docker/Podman SBB wrapper build/tests: passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed.
 
 Evidence summary:
 
