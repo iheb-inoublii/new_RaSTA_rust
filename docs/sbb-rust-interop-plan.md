@@ -1,6 +1,14 @@
 # Rust-to-SBB Interoperability Plan
 
-Step 8H verified the SBB wrapper SBB-to-SBB baseline: passive reaches `Up`, receives heartbeat, exits cleanly after the smoke condition, and active reaches `Up` then closes cleanly. Step 8I prepares the Rust side only. It does not claim Rust-to-SBB interoperability.
+This document records the original preparation plan and baseline values. The
+planned campaign has since completed: native SBB-to-SBB five-round Ping/Pong,
+native Rust-to-SBB handshake/heartbeat and five-round Ping/Pong, and the
+Docker/Podman reproduction all passed. See the
+[final interop summary](final-interop-summary.md) and
+[completed result](../interop/results/sbb-rust-ping-pong-5-rounds.md).
+
+Those results are controlled test evidence only, not certification, production
+readiness, an independent assessment, or proof of full DIN conformance.
 
 ## SBB baseline values
 
@@ -35,7 +43,7 @@ Default `rasta-node` role mapping for `--profile sbb-local`:
 
 The first live test should run Rust active against SBB passive.
 
-## Planned live test
+## Original planned live test
 
 Start SBB passive:
 
@@ -57,6 +65,11 @@ Expected evidence before claiming success:
 - Disconnect datagrams match the SBB-observed length `48`.
 - No timeout, malformed-frame diagnostic, or SBB `rasys_FatalError` occurs.
 
-## Open points
+## Original open points and final disposition
 
-The live test still needs to verify timestamp compatibility, sequence behavior, and exact SBB response handling. Docker and SBB ping-pong remain future work.
+The live test subsequently verified timestamp compatibility and response
+handling sufficiently for the recorded handshake/heartbeat and five-round
+Ping/Pong scenario. Docker/Podman reproduction also passed. Broader sequence,
+loss, retransmission, and fault-injection coverage remains outside this evidence
+scope. `ChannelSupervisionFailure` diagnostics can appear during SBB runs but
+did not prevent successful five-round completion.

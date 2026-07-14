@@ -1,13 +1,15 @@
-# Docker Interop Skeleton
+# Docker/Podman Interop Environment
 
-This directory contains the first Docker-based interop skeleton. It is meant to
+This directory contains the container-based interop environment used to
 reproduce the existing native Kali Rust-to-SBB evidence in a controlled
 environment without changing Rust protocol behavior or SBB wrapper behavior.
 
 Status:
 
 - Native Kali Rust-to-SBB 5-round Ping/Pong: passed.
-- Docker reproduction: pending.
+- Docker/Podman Rust tests: passed.
+- Docker/Podman SBB wrapper build/tests: passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed.
 
 ## Files
 
@@ -15,7 +17,7 @@ Status:
   `cargo test --workspace --all-targets --all-features`.
 - `Dockerfile.sbb-wrapper` installs CMake, Ninja, and a C toolchain for the SBB
   wrapper.
-- `docker-compose.yml` defines Rust test, SBB wrapper build, and intended live
+- `docker-compose.yml` defines Rust test, SBB wrapper build, and recorded live
   Rust active to SBB passive services.
 
 ## SBB Checkout
@@ -54,7 +56,7 @@ cmake --build interop/sbb-wrapper/build
 ctest --test-dir interop/sbb-wrapper/build --output-on-failure
 ```
 
-## Intended Live Rust-To-SBB Test
+## Live Rust-To-SBB Test
 
 The compose live profile uses fixed container IP addresses because the current
 Rust CLI accepts IP addresses, not DNS service names.
@@ -65,7 +67,7 @@ Start the SBB passive wrapper and Rust active ping-pong node:
 docker compose -f docker/interop/docker-compose.yml --profile live up --build
 ```
 
-The intended scenario is:
+The recorded scenario is:
 
 - SBB passive wrapper at `172.28.0.20`
 - Rust active `ping-pong-node` at `172.28.0.10`
@@ -75,5 +77,12 @@ The intended scenario is:
 - channel 0: Rust `7100` to SBB `7000`
 - channel 1: Rust `7101` to SBB `7001`
 
-Do not treat Docker interop as passed until the compose run has been executed
-and the logs show both sides completing the five Ping/Pong rounds.
+The captured compose run showed both sides completing all five Ping/Pong rounds.
+See the [final interop summary](../../docs/final-interop-summary.md) and
+[completed result](../../interop/results/sbb-rust-ping-pong-5-rounds.md).
+
+This is controlled test evidence only. It is not certification, production
+readiness, an independent assessment, or proof of full DIN conformance.
+`ChannelSupervisionFailure` diagnostics can appear during SBB interoperability
+runs, but they did not prevent successful five-round completion in the captured
+native and Docker/Podman evidence.

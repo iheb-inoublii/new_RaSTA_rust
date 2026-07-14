@@ -6,9 +6,15 @@ This matrix records expected coverage areas from established RaSTA implementatio
 
 The SBB RaSTA stack has a documented local baseline investigation in `docs/sbb-baseline-investigation.md`. The SBB repository configured and built successfully after installing `libgmock-dev`, and its CTest suite passed with `24/24` tests passing.
 
-No ready UDP client/server demo executable was found in the SBB build output. Only GoogleTest unit-test binaries were identified, so live Rust-to-SBB interoperability likely requires a small SBB adapter/wrapper executable that implements the SBB transport integration interfaces.
+No ready UDP client/server demo executable was found in the original SBB build
+output. A local SBB adapter/wrapper was therefore added to implement the
+transport integration interfaces.
 
-Do not claim Rust-to-SBB interoperability yet. Step 8H verified the SBB wrapper SBB-to-SBB baseline, and Step 8I adds an opt-in Rust `sbb-local` preparation profile and CLI selection only. The next evidence step is a live Rust active endpoint against an SBB passive wrapper.
+The controlled campaign subsequently passed native SBB-to-SBB five-round
+Ping/Pong, native Rust-to-SBB handshake/heartbeat and five-round Ping/Pong, and
+Docker/Podman reproduction. See the
+[final interop summary](final-interop-summary.md). This evidence is limited to
+the recorded configuration and is not a broad conformance claim.
 
 | Test area | What librasta/SBB-style tests usually cover | Current Rust coverage if known | Gap | Planned Rust test/spec file |
 | --- | --- | --- | --- | --- |
@@ -26,6 +32,6 @@ Do not claim Rust-to-SBB interoperability yet. Step 8H verified the SBB wrapper 
 | Transport behavior | Transport trait send/receive errors | Mock transport tests | Keep transport refactor out of this phase | `tests/specs/unit/transport-trait-behavior.md` |
 | Rust-to-Rust | Handshake, data, ping-pong, disconnect | In-memory and app-level tests exist partially | Add ping-pong and use-case apps later | `tests/specs/integration/rust-to-rust-ping-pong.md` |
 | Rust-to-librasta | Handshake, data, heartbeat, ping-pong | Working local profile and 40-second result documented | Automate in CI or Docker later | `tests/specs/interoperability/rust-to-librasta-40-second-heartbeat.md` |
-| Rust-to-SBB preparation | SBB profile matching, wire lengths, role/port mapping | `RastaProfile::sbb_local()`, `--profile sbb-local`, and ConnReq/Heartbeat/Disconnect RedL length tests | Need live Rust-to-SBB trace evidence | `tests/specs/interoperability/rust-to-sbb-preparation.md` |
-| Rust-to-SBB live tests | Handshake, heartbeat, data, ping-pong | SBB-to-SBB wrapper baseline reached Up and exchanged heartbeat; Rust-to-SBB not claimed | Run Rust active against SBB passive and compare traces | `tests/specs/interoperability/rust-to-sbb-handshake.md` |
-| Docker | Repeatable multi-process tests | Not implemented by request | Add later without changing transports now | `tests/specs/docker/docker-rust-to-rust.md` |
+| Rust-to-SBB profile | SBB profile matching, wire lengths, role/port mapping | `RastaProfile::sbb_local()`, CLI selection, and RedL length tests | Expand fixture catalog if needed | `tests/specs/interoperability/rust-to-sbb-preparation.md` |
+| Rust-to-SBB live tests | Handshake, heartbeat, data, ping-pong | Native handshake/heartbeat and five-round Ping/Pong passed | Add loss/retransmission/fault scenarios before broader claims | `tests/specs/interoperability/rust-to-sbb-handshake.md` |
+| Docker/Podman | Repeatable multi-process tests | Rust tests, wrapper build/tests, and live five-round Rust-to-SBB scenario passed | CI automation remains optional future work | `tests/specs/interoperability/docker-interop.md` |

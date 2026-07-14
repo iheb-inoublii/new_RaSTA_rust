@@ -1,5 +1,9 @@
 # SBB wrapper design
 
+This specification records the original design phase. The wrapper and
+controlled Rust-to-SBB campaign were subsequently completed; see
+`docs/final-interop-summary.md`.
+
 ## Objective
 
 Define the planned SBB wrapper architecture required for future Rust-to-SBB interoperability testing.

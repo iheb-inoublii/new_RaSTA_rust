@@ -13,7 +13,7 @@ Clause references identify engineering areas only and do not reproduce DIN text.
 | Partially implemented | Some required behavior exists, but the implementation is incomplete. |
 | Not implemented | No active implementation exists. |
 | Project-configurable | Values must come from a project profile/safety case. |
-| External interoperability pending | Local tests pass; independent-peer evidence is not yet available. |
+| Controlled interoperability evidence | A recorded peer test passed for a specific configuration; this is not certification or broad conformance evidence. |
 
 ## Traceability summary
 
@@ -36,12 +36,12 @@ Clause references identify engineering areas only and do not reproduce DIN text.
 | Retransmission request/response/data | Implemented and tested for deterministic sequence-gap recovery | `connection::{send_retransmission_request, send_retransmission_response, retransmit_from, handle_packet}`, `retransmission::RetransmissionBuffer` | `retransmission_request_uses_zero_payload_and_confirmed_sequence_point`, `sequence_gap_retransmission_recovers_lost_data_in_order`, `retransmit_from_validates_window_and_propagates_transport_failure` |
 | Timestamp and heartbeat supervision | Implemented and tested for current shared-protocol-epoch behavior | `time`, `connection::time_supervision`, `connection::heartbeat`, `connection::{validate_timeliness,refresh_receive_supervision}` | time tests, heartbeat tests, unequal local-origin tests, `time_supervision_preserves_exact_boundaries_and_wraparound`, `timestamp_validation_covers_future_boundary_and_half_range`, `confirmed_timestamp_validation_covers_progression_repeat_future_and_wrap`, `peer_silence_times_out_at_exact_t_max_and_sends_disconnect_once`, `valid_peer_heartbeat_restarts_deadline_but_sent_heartbeat_alone_does_not`, invalid timestamp tests, two-endpoint heartbeat loop |
 | Diagnostics and SRL counters | Partially implemented; tested for implemented triggers | `srl::{DiagnosticEvent, SrlErrorCounters}`, `connection::record_diagnostic` | `bad_safety_code_is_rejected_and_counted_without_closing_connection`, `diagnostics_queue_overflow_is_counted_without_unrelated_counter_changes` |
-| Concrete UDP platform adapter | Implemented and tested locally | `rasta_platform::udp::UdpSocketTransport` | UDP bind/empty receive/loopback tests; external interoperability pending |
+| Concrete UDP platform adapter | Implemented and tested locally and in controlled SBB interop | `rasta_platform::udp::UdpSocketTransport` | UDP bind/empty receive/loopback tests; native and Docker/Podman five-round Rust-to-SBB evidence |
 | Standard clock adapter | Implemented and tested structurally; protocol timestamp no longer starts at each process' zero | `rasta_platform::std_clock::StdClock` | standard-clock monotonic/protocol timestamp tests |
 | Embedded Ethernet adapter trait | Implemented and tested with fake driver | `rasta_platform::embedded_ethernet` | fake-driver success and error propagation tests |
 | Runnable node CLI and profile wiring | Implemented and tested for parsing/profile; local smoke exercised | `apps/rasta-node/src/main.rs`, `profile.rs` | CLI role/port tests, profile tests, prior local two-node smoke |
 | Advanced per-channel quality/adaptive monitoring | Partially implemented | `redundancy::channel` | Minimal deterministic per-channel status, counters, timeout, and recovery are tested; statistical scoring/dynamic tuning remains project-specific |
-| Independent implementation interoperability | External interoperability pending | N/A | Do not claim; future controlled test campaign required |
+| SBB-stack interoperability through local wrapper | Controlled interoperability evidence | `RastaEndpoint`, `sbb-local`, `interop/sbb-wrapper` | Native handshake/heartbeat and five-round Ping/Pong passed; Docker/Podman reproduction passed. Scope is limited to the recorded configuration. |
 
 ## Required project decisions
 
@@ -56,5 +56,5 @@ node profile is explicitly academic and non-production.
 - Independently review the DIN interpretation for which control PDU
   confirmation fields are acknowledgements versus request points.
 - Add parser fuzzing in a separate phase if tooling is approved.
-- Perform independent-peer interoperability only after deterministic local
-  coverage and project requirements are stable.
+- Extend controlled peer testing to robustness and fault scenarios if required;
+  the recorded five-round Ping/Pong result is not an independent assessment.

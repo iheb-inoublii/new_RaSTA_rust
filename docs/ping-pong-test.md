@@ -66,7 +66,7 @@ cargo run -p ping-pong-node -- passive 127.0.0.1 --rounds 10 --trace
 cargo run -p ping-pong-node -- active 127.0.0.1 --rounds 10 --trace
 ```
 
-## Rust-to-SBB Ping-Pong Preparation
+## Rust-to-SBB Ping-Pong
 
 Rust-to-SBB connection establishment and heartbeat exchange have passed with
 `rasta-node --profile sbb-local`. Step 8L adds the same `--profile sbb-local`
@@ -142,6 +142,8 @@ The payload format is intentionally fixed and compact so the same scenario can l
 - Rust to librasta
 - Rust to SBB
 
-Rust-to-SBB connection and heartbeat are proven. Rust-to-SBB application
-Ping/Pong is proven for two rounds and for five paced rounds. Docker remains
-pending.
+Controlled Rust-to-SBB connection and heartbeat evidence passed. Application
+Ping/Pong passed for two rounds and for five paced rounds, and Docker/Podman
+reproduced the five-round scenario. See the
+[completed result](../interop/results/sbb-rust-ping-pong-5-rounds.md). This does
+not establish certification, production readiness, or full DIN conformance.

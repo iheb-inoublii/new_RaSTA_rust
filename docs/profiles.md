@@ -32,7 +32,7 @@ This profile is intended only for Rust-to-librasta local interoperability testin
 
 ## sbb-local profile
 
-`RastaProfile::sbb_local()` returns the Step 8I Rust-to-SBB preparation profile derived from the verified SBB wrapper baseline:
+`RastaProfile::sbb_local()` returns the Rust-to-SBB controlled-test profile derived from the inspected SBB wrapper configuration:
 
 - protocol version `0303`
 - lower MD4 safety code with the SBB-observed RFC MD4 initial value
@@ -42,7 +42,11 @@ This profile is intended only for Rust-to-librasta local interoperability testin
 - `n_send_max = 20`, `mwa = 10`
 - peer-relative timestamp compatibility
 
-This profile is opt-in only. It prepares Rust-to-SBB live testing against the SBB wrapper, but it is not itself a Rust-to-SBB interoperability success claim.
+This profile is opt-in only. Native and Docker/Podman five-round Rust-to-SBB
+Ping/Pong runs passed with it; see the
+[final interop summary](final-interop-summary.md). A profile definition by itself
+is not interoperability or conformance evidence, and the recorded runs apply
+only to their controlled test configuration.
 
 ## Custom profile builder
 
@@ -72,4 +76,4 @@ Profiles with `SafetyCodeLength::None`, redundancy CRC option A, or an interoper
 | --- | --- |
 | Rust-to-Rust | `RastaProfile::academic_default()` |
 | Rust-to-librasta | `RastaProfile::librasta_local()` |
-| Rust-to-SBB preparation | `RastaProfile::sbb_local()` |
+| Controlled Rust-to-SBB wrapper testing | `RastaProfile::sbb_local()` |

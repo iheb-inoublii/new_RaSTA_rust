@@ -1,5 +1,8 @@
 # Interoperability test result
 
+This is a reusable blank template, not the final completed SBB result. See the
+[completed five-round Rust-to-SBB result](sbb-rust-ping-pong-5-rounds.md).
+
 Use statuses: `PASS`, `FAIL`, `BLOCKED`, `NOT RUN`.
 
 ## Metadata

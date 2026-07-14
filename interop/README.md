@@ -60,5 +60,6 @@ must not be treated as approved operational railway parameters.
 - [Profile comparison](profile-comparison.md) — Rust/peer configuration comparison
 - [Test plan](test-plan.md) — phased controlled test procedure
 - [Packet capture](packet-capture.md) — Wireshark/tcpdump capture guidance
+- [Completed five-round result](results/sbb-rust-ping-pong-5-rounds.md) — captured Rust-to-SBB result
 - [Final interop summary](../docs/final-interop-summary.md) — final native and container status
 - [Docker interop](../docs/docker-interop.md) — Docker/Podman build and reproduction workflow

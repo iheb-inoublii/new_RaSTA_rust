@@ -1,5 +1,12 @@
 # Final Interop Summary
 
+Related evidence and context:
+
+- [Controlled interoperability harness](../interop/README.md)
+- [Completed five-round Rust-to-SBB result](../interop/results/sbb-rust-ping-pong-5-rounds.md)
+- [EULYNX context](eulynx-context.md)
+- [Docker/Podman reproduction](docker-interop.md)
+
 Branch: `refactor/test-profile-foundation`
 
 Protected branch: `interop/librasta-wire-compat`

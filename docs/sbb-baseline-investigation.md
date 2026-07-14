@@ -1,5 +1,10 @@
 # SBB Baseline Investigation
 
+This is a historical baseline document from before the wrapper campaign. The
+subsequent native and Docker/Podman Rust-to-SBB five-round Ping/Pong scenarios
+passed; see the [final interop summary](final-interop-summary.md). Statements
+below about future work describe the status at the time of this investigation.
+
 ## Purpose
 
 Document the manual baseline investigation of the SBB RaSTA stack before any Rust-to-SBB interoperability wrapper or Docker setup is added. Step 8I uses this evidence and the later Step 8H wrapper baseline to add an opt-in Rust `sbb-local` preparation profile, without claiming Rust-to-SBB interoperability.

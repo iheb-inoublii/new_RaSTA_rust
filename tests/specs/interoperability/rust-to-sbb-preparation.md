@@ -1,7 +1,9 @@
 # Rust-to-SBB preparation
 
 ## Objective
-Verify that the Rust library and `rasta-node` expose an opt-in SBB-compatible preparation profile without claiming live Rust-to-SBB interoperability.
+Verify that the Rust library and `rasta-node` expose an opt-in SBB-compatible
+test profile. Interoperability evidence is recorded separately from profile
+validation.
 
 ## Related requirement
 Step 8I Rust-to-SBB preparation after the verified Step 8H SBB-to-SBB wrapper baseline.
@@ -10,7 +12,7 @@ Step 8I Rust-to-SBB preparation after the verified Step 8H SBB-to-SBB wrapper ba
 The SBB wrapper SBB-to-SBB baseline has been verified. Rust academic/default and `librasta-local` profiles remain unchanged.
 
 ## Test setup
-Run Rust unit tests for `RastaProfile::sbb_local()` and `rasta-node` CLI parsing. Live Rust-to-SBB execution is a later step.
+Run Rust unit tests for `RastaProfile::sbb_local()` and `rasta-node` CLI parsing.
 
 ## Test data
 - network ID `123456`
@@ -31,10 +33,13 @@ Run Rust unit tests for `RastaProfile::sbb_local()` and `rasta-node` CLI parsing
 The SBB preparation profile exists, is opt-in only, preserves known SBB timing and checksum settings, and produces the expected SBB-observed frame lengths. The CLI accepts `--profile sbb-local` with role-specific ID and UDP defaults.
 
 ## Postconditions
-No Rust protocol behavior is changed for academic/default or `librasta-local` profiles. No Rust-to-SBB interoperability success is claimed.
+No Rust protocol behavior is changed for academic/default or `librasta-local`
+profiles. The profile test alone is not an interoperability success claim.
 
 ## Evidence
 Automated Rust tests cover the profile values, opt-in validation, RedL datagram lengths, and CLI parsing.
 
 ## Automation status
-Automated in Rust unit tests. Live Rust-to-SBB handshake remains planned in `tests/specs/interoperability/rust-to-sbb-handshake.md`.
+Automated in Rust unit tests. The subsequent live Rust-to-SBB handshake and
+five-round Ping/Pong passed; see the
+[completed result](../../../interop/results/sbb-rust-ping-pong-5-rounds.md).

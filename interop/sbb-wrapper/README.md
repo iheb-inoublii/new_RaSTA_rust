@@ -1,8 +1,17 @@
 # SBB Wrapper Skeleton
 
-This directory contains a compile-ready skeleton for a future SBB RaSTA wrapper.
-It does not implement Rust-to-SBB interoperability, does not add an `sbb-local`
-Rust profile, and does not modify the external SBB checkout.
+This directory contains the local SBB RaSTA wrapper used for the controlled
+native and Docker/Podman interoperability campaign. The wrapper provides POSIX
+UDP transport, a RedL/SafRetL bridge, and the Ping/Pong runtime used in the
+successful five-round Rust-to-SBB runs. It does not modify the external SBB
+checkout.
+
+The sections below retain the status that applied during each incremental build
+step. Final status and commands are recorded in the
+[final interop summary](../../docs/final-interop-summary.md) and
+[completed result](../results/sbb-rust-ping-pong-5-rounds.md). This is controlled
+test evidence only, not certification, production readiness, or full DIN
+conformance.
 
 The current skeleton:
 
@@ -456,8 +465,9 @@ cat /tmp/sbb-passive.log
 cat /tmp/sbb-active.log
 ```
 
-This remains SBB-wrapper-only and still does not claim Rust-to-SBB
-interoperability.
+That concurrent command is an SBB-wrapper-to-SBB-wrapper baseline. The separate
+captured Rust-active/SBB-passive run provides the controlled Rust-to-SBB
+evidence.
 
 The CLI runtime log now says:
 
@@ -484,16 +494,15 @@ Default port mapping:
 | active | channel 0 | `7100` | `7000` |
 | active | channel 1 | `7101` | `7001` |
 
-For now, the executable logs Step 8I SBB-to-SBB Ping/Pong runtime smoke status,
-prints settings, opens two nonblocking UDP sockets, initializes the RedL adapter
+The executable prints settings, opens two nonblocking UDP sockets, initializes the RedL adapter
 and SafRetL, runs `srapi_CheckTimings`/state/read polling for `--run-seconds`,
 and closes sockets. Both roles call `srapi_OpenConnection`: active uses the
 client ID ordering `0x61 -> 0x62` and passive uses the server/listening ID
 ordering `0x62 -> 0x61`. Startup logs print the selected connection ID, sender
 ID, receiver ID, network ID, and whether `srapi_OpenConnection` is called.
 Active sends Ping payloads only after SafRetL reports `Up`; passive replies
-with matching Pong payloads. This still does not establish or claim Rust-to-SBB
-interoperability.
+with matching Pong payloads. The captured Rust-active/SBB-passive execution
+completed five rounds under the recorded configuration.
 
 ## Ping/Pong Payload
 
@@ -534,8 +543,12 @@ The function signatures have been aligned to the SBB public headers. If the SBB
 checkout is not provided, the wrapper keeps fallback definitions for standalone
 smoke builds.
 
-## Remaining Work After Step 8H
+## Historical remaining work after Step 8H
 
 - Keep the wrapper outside Rust protocol code.
-- Verify in Kali that the post-disconnect polling fix prevents `rasys_FatalError` in the normal SBB-to-SBB baseline run.
-- Preserve the current no Rust-to-SBB interoperability claim.
+- Verify the normal SBB-to-SBB baseline before mixed-peer testing.
+- Run the controlled Rust-to-SBB handshake, heartbeat, and Ping/Pong campaign.
+
+Those test steps subsequently passed, including five-round native and
+Docker/Podman Ping/Pong. Broader robustness and conformance work remains out of
+scope.

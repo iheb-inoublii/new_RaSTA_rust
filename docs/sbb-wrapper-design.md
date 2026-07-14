@@ -1,6 +1,11 @@
 # SBB Wrapper Design Plan
 
-This document started as the SBB wrapper design plan and now records the incremental wrapper status. The wrapper does not add Docker or claim Rust-to-SBB interoperability. Step 8I adds the Rust `RastaProfile::sbb_local()` preparation profile separately from the wrapper.
+This document started as the SBB wrapper design plan and records incremental
+historical steps through the completed campaign. The final local wrapper,
+`sbb-local` profile, native Rust-to-SBB five-round Ping/Pong, and Docker/Podman
+reproduction passed under the recorded test configuration. Historical sections
+retain the narrower status that applied at each step. See the
+[final interop summary](final-interop-summary.md).
 
 ## Why A Wrapper Is Needed
 
@@ -685,7 +690,7 @@ The Kali two-process SBB wrapper runtime passed for five application rounds:
 Status:
 
 - SBB wrapper active/passive Ping/Pong: passed.
-- Rust-to-SBB live interoperability: pending.
+- Rust-to-SBB live interoperability: pending at Step 8J; handshake/heartbeat and five-round Ping/Pong passed in later steps.
 
 ## Step 8K Rust-To-SBB Live Baseline
 

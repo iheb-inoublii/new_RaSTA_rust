@@ -1,6 +1,8 @@
 # RaSTA Test Specifications
 
-This directory contains formal test specifications for unit, integration, interoperability, and future Docker-based tests.
+This directory contains formal test specifications for unit, integration,
+interoperability, and Docker/Podman-based tests. Individual specifications state
+whether their recorded scenario passed or remains future work.
 
 Every test specification uses the same sections:
 

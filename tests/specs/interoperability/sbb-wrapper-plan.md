@@ -46,7 +46,7 @@ No Rust protocol behavior is changed. No Docker setup or Rust-to-SBB interoperab
 - Previous gap: passive stopped after `Up` and heartbeat, so active Ping messages were not answered with Pong replies.
 - Runtime change: passive remains alive after `Up`, decodes Ping counters, sends matching Pong counters, and exits successfully only after all requested rounds are answered.
 - Active runtime change: active waits for all expected Pong counters before reporting success.
-- Rust-to-SBB interoperability: pending; no success claim is made.
+- Rust-to-SBB interoperability: pending at this historical step; later passed for the recorded five-round scenario.
 
 ## Step 8J status
 - SBB-to-SBB Ping/Pong: passed.
@@ -54,7 +54,7 @@ No Rust protocol behavior is changed. No Docker setup or Rust-to-SBB interoperab
 - Passive summary: `received_pings=5 sent_pongs=5 success=true`.
 - Active received `Pong(1)..Pong(5)`.
 - Active summary: `sent_pings=5 received_pongs=5 success=true`.
-- Rust-to-SBB interoperability: pending; no success claim is made.
+- Rust-to-SBB interoperability: pending at Step 8J; later passed for the recorded five-round scenario.
 
 ## Step 8K status
 - SBB-to-SBB Ping/Pong: passed.
@@ -137,7 +137,9 @@ Evidence summary:
 - `ChannelSupervisionFailure` diagnostics were observed during the run, but did not prevent completion.
 
 ## Automation status
-Documentation/spec review only. Later steps add wrapper source, wrapper build tests, SBB-to-SBB baseline tests, and Rust-to-SBB preparation tests.
+The original plan progressed through wrapper source/build tests, the SBB-to-SBB
+baseline, native Rust-to-SBB testing, and Docker/Podman reproduction. Final
+controlled status is recorded in `docs/final-interop-summary.md`.
 
 ## Open points
 - Observe timestamp behavior live.

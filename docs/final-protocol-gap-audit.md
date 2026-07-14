@@ -1,7 +1,7 @@
-# Final RaSTA protocol gap audit — pre-interoperability
+# Final RaSTA protocol gap audit — updated interoperability status
 
 This audit is documentation-only. It does not claim DIN compliance,
-certification readiness, or independent interoperability. It reviews the
+certification readiness, full conformance, or independent assessment. It reviews the
 current Rust workspace against the project’s stated RaSTA 03.03 intent and the
 implementation evidence available in this repository.
 
@@ -12,22 +12,24 @@ than inferred from memory.
 
 ## Executive summary
 
-The workspace is compile/test ready and same-stack functionally ready for a
-controlled external interoperability attempt with known limitations. The
+The workspace is compile/test ready. Controlled interoperability evidence now
+exists against the SBB RaSTA stack through the local wrapper, including native
+and Docker/Podman five-round Ping/Pong completion. The
 protocol core is `no_std`, dependency-free, safe Rust, fixed-memory, and has
 deterministic tests for framing, safety code, redundancy, sequencing,
 retransmission, timeliness, confirmed sequence validation, and conservative
 per-channel monitoring.
 
-It is not certification-ready. It is also not ready for broad interoperability
-testing because several DIN table/event interpretations remain unverified, the
-same-stack tests are not independent evidence, and project-specific profile
-parameters still need external review.
+It is not certification-ready or ready for broad interoperability claims.
+Several DIN table/event interpretations remain unverified, the controlled SBB
+tests are not an independent assessment, and project-specific profile parameters
+still need external review.
 
 Readiness decision:
 
 ```text
-Ready for controlled external interoperability testing with known limitations
+Controlled SBB interoperability passed under recorded test conditions; broader
+conformance and readiness are not established
 ```
 
 ## Critical blockers
@@ -56,7 +58,7 @@ Allowed status values used below:
 - `Implemented with project-specific assumption`
 - `Not implemented`
 - `Unverified interpretation`
-- `External interoperability pending`
+- `Controlled interoperability evidence`
 - `Not applicable to selected profile`
 
 | Requirement / clause | Expected behavior | Implementation module | Implementation symbol | Test name | Status | Risk | Required next action |
@@ -127,7 +129,7 @@ Allowed status values used below:
 | Diagnostics queue | Fixed 16-event queue, overflow counted | `queue.rs`, `connection/mod.rs` | `FixedQueue<DiagnosticEvent,16>` | diagnostics overflow test | Implemented and directly tested | Low | Add external observability API if needed. |
 | Error counters | Fixed SRL counters for safety/address/type/sequence/confirmed sequence | `srl.rs`, `connection/mod.rs` | `SrlErrorCounters`, `record_diagnostic` | counter tests | Partially implemented | Medium | Address counter not currently wired; map all standard counters. |
 | Channel counters | Fixed per-channel counters saturating on increment | `redundancy/channel.rs` | `ChannelCounters` | channel tests | Implemented but indirectly tested | Low | Add explicit saturation test if required. |
-| Independent interoperability | Controlled peer evidence required | N/A | N/A | none | External interoperability pending | High | Run with independent implementation after addressing high-risk interpretations. |
+| SBB-stack interoperability through local wrapper | Controlled peer evidence required | `endpoint`, `sbb-local`, SBB wrapper | public endpoint and wrapper runtime | native and Docker/Podman five-round Ping/Pong evidence | Controlled interoperability evidence | Medium | Keep claims limited to the recorded configuration; add robustness/fault scenarios before broader claims. |
 
 ## Message-type audit
 
@@ -291,12 +293,13 @@ The 95 tests include:
 - same-stack tests: all two-node Rust tests use this implementation on both
   sides;
 - platform smoke tests: UDP bind/empty receive/loopback tests;
-- external interoperability tests: none.
+- controlled SBB interoperability tests: native handshake/heartbeat and
+  five-round Ping/Pong passed; Docker/Podman reproduction passed.
 
 Two Rust nodes using this same stack are not independent interoperability
 evidence.
 
-Remaining tests recommended before or during controlled external testing:
+Additional tests recommended before making any broader interoperability claim:
 
 1. Clause-by-clause state/event table tests from the DIN document.
 2. Independent trace vectors for all PDU and RL frame layouts.
@@ -341,8 +344,8 @@ Results are summarized in the final response for this audit turn.
    safety code with profile IV, and CRC option B.
 4. Add missing direct tests for MWA, disconnect payloads, repeated setup
    messages, malformed control PDUs, and retransmission edge cases.
-5. Run a controlled external interoperability campaign with packet capture,
-   logging, and a fixed academic profile.
+5. Extend the completed controlled SBB campaign with packet capture, robustness,
+   loss, retransmission, and fault scenarios where project requirements demand it.
 6. Feed observed mismatches back into the requirement matrix before any broader
    testing.
 
@@ -351,15 +354,19 @@ Results are summarized in the final response for this audit turn.
 Compile/test readiness: established for the current workspace.
 
 Same-stack functional readiness: established for the implemented local behavior
-covered by 95 tests.
+covered by the workspace test suite.
 
-External interoperability readiness: ready only for controlled external
-interoperability testing with known limitations and explicit packet capture.
+Controlled SBB interoperability: passed for the recorded native and
+Docker/Podman handshake, heartbeat, and five-round Ping/Pong scenarios.
+
+Broader interoperability readiness: not established beyond the recorded test
+configuration.
 
 Certification readiness: not established.
 
 Final decision:
 
 ```text
-Ready for controlled external interoperability testing with known limitations
+Controlled SBB interoperability evidence exists; production, certification, and
+full DIN conformance readiness are not established
 ```

@@ -1,41 +1,47 @@
 # Profile comparison
 
-Do not mark `Match?` as yes until the peer configuration is inspected directly.
+This comparison records values inspected for the controlled local test setups.
+It is not a broad statement about every configuration supported by the peer
+implementations and does not establish conformance.
 
-| Parameter | Rust value | Peer value | Match? | Source/reference | Notes |
-|---|---|---|---|---|---|
-| selectable profile | `academic` default; `librasta-local` opt-in | C librasta local config | Partial | `apps/rasta-node/src/main.rs` | Wire length/layout only; no mixed handshake claim |
-| RaSTA version | ASCII `0303` | Pending | Pending | `apps/rasta-node/src/profile.rs` | Academic test profile |
-| local node ID | A: `0x1234`, B: `0x5678` by default | Pending | Pending | `apps/rasta-node/src/main.rs` | Override with `--local-id` |
-| remote node ID | A: `0x5678`, B: `0x1234` by default | Pending | Pending | `apps/rasta-node/src/main.rs` | Override with `--remote-id` |
-| network identifier | `0x00000001` | Pending | Pending | `apps/rasta-node/src/profile.rs` | Test-only |
-| MD4 initial value | `02 23 45 67 98 ab cd ef ff dc ba 98 77 54 32 10` | Pending | Pending | `apps/rasta-node/src/profile.rs` | Non-production |
-| MD4-8 or MD4-16 | MD4-8 lower 8 bytes | Pending | Pending | `apps/rasta-node/src/main.rs` | `SafetyCodeConfig::md4_low8` |
-| redundancy CRC option | Option B | Pending | Pending | `apps/rasta-node/src/main.rs` | No silent changes |
-| channel count | 2 | Pending | Pending | `apps/rasta-node/src/profile.rs` | Fixed demo mapping |
-| local channel ports | A: 5000/6000, B: 5001/6001 | Pending | Pending | `apps/rasta-node/src/main.rs` | Override per channel |
-| remote channel ports | A: 5001/6001, B: 5000/6000 | Pending | Pending | `apps/rasta-node/src/main.rs` | Override per channel |
-| `T_max` | 1800 ms | Pending | Pending | `apps/rasta-node/src/profile.rs` | Test-only |
-| `T_h` | 300 ms | Pending | Pending | `apps/rasta-node/src/profile.rs` | Test-only |
-| `T_seq` | 100 ms | Pending | Pending | `apps/rasta-node/src/profile.rs` | Test-only |
-| `N_sendmax` | 20 | Pending | Pending | `apps/rasta-node/src/profile.rs` | Profile-selected |
-| MWA | 10 | Pending | Pending | `apps/rasta-node/src/profile.rs` | Partially verified |
-| defer queue capacity | 4 | Pending | Pending | `apps/rasta-node/src/profile.rs` | Test-only |
-| packetization limit | 1 | Pending | Pending | `apps/rasta-node/src/profile.rs` | One application message per packet |
-| maximum packet size | SRL payload 256 bytes | Pending | Pending | `crates/rasta-core/src/connection/pdu.rs` | Fixed core buffer |
-| byte order assumptions | little-endian SRL/RL numeric fields | Pending | Pending | core PDU/RL frame code | Verify by capture |
-| connection initiator | Lower sender ID opens actively | Pending | Pending | `RastaConnection::connect` | Default A initiates |
+## `sbb-local` captured profile
+
+| Parameter | Rust `sbb-local` value | Observed SBB wrapper value | Recorded result |
+|---|---|---|---|
+| RaSTA version | ASCII `0303` | `0303` in inspected wrapper configuration | Matched for captured test |
+| active sender / receiver | `0x61` / `0x62` | `0x61` / `0x62` | Matched |
+| passive sender / receiver | `0x62` / `0x61` | `0x62` / `0x61` | Matched |
+| network identifier | `123456` | `123456` | Matched |
+| safety code | Lower MD4 with SBB-observed RFC MD4 initial value | SBB-compatible lower MD4 test configuration | Matched for captured test |
+| redundancy check code | Option A / no RedL check code | Option A / no RedL check code | Matched for captured test |
+| redundancy channels | 2 | 2 | Matched |
+| active ports | Local `7100/7101`, remote `7000/7001` | Remote peer of passive `7000/7001` | Matched |
+| passive ports | Local `7000/7001`, remote `7100/7101` | Local `7000/7001`, remote `7100/7101` | Matched |
+| `T_max` | `750 ms` | `750 ms` | Matched |
+| `T_h` | `300 ms` | `300 ms` | Matched |
+| `T_seq` | `50 ms` | `50 ms` | Matched |
+| `N_sendmax` / MWA | `20` / `10` | Inspected local wrapper/profile configuration | Matched for captured test |
+| timestamp mode | Peer-relative compatibility | Observed live exchange accepted | Passed captured handshake/heartbeat |
+
+The native and Docker/Podman runs completed five Ping/Pong rounds with this
+configuration. See the
+[completed result](results/sbb-rust-ping-pong-5-rounds.md) and
+[final interop summary](../docs/final-interop-summary.md). This controlled result
+is not certification, production readiness, or proof of full DIN conformance.
 
 ## `librasta-local` opt-in profile
 
-This profile is a minimal wire-layout preset for local librasta experiments:
+This profile is a local C librasta wire-compatibility preset:
 
 ```bash
 cargo run -p rasta-node --release -- A 127.0.0.1 --profile librasta-local --trace-wire
 ```
 
-It uses client ID `0x60`, server ID `0x61`, client ports `9998/9999`,
-server ports `8888/8889`, RaSTA version `0303`, network ID `1234`,
-`T_h = 2000 ms`, `T_max = 10000 ms`, SR checksum length NONE, and redundancy
-TYPE_A with zero CRC bytes. This only establishes matching frame lengths and
-field offsets; it is not a completed mixed Rust/C handshake result.
+It uses client ID `0x60`, server ID `0x61`, client ports `9998/9999`, server
+ports `8888/8889`, RaSTA version `0303`, network ID `1234`, `T_h = 2000 ms`,
+`T_max = 10000 ms`, SR checksum length NONE, and redundancy TYPE_A with zero
+CRC bytes. These unsafe/no-checksum settings require explicit opt-in and are
+test-only.
+
+The librasta profile and evidence are separate from the final SBB campaign. No
+result for one peer should be generalized to another implementation or profile.

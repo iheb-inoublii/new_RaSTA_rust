@@ -1,22 +1,39 @@
-# Docker Rust-to-SBB
+# Docker/Podman Rust-to-SBB
 
 ## Objective
-Define the future containerized Rust-to-SBB scenario.
-## Related requirement
-Future Docker plus SBB interoperability coverage.
-## Preconditions
-SBB build and baseline information is available.
+
+Reproduce the native five-round Rust-to-SBB Ping/Pong scenario in the controlled
+container environment.
+
 ## Test setup
-Future Docker network with Rust and SBB containers.
-## Test data
-TBD SBB profile values from evidence.
+
+- Rust active container: `172.28.0.10`.
+- SBB passive wrapper container: `172.28.0.20`.
+- Profile: `sbb-local`.
+- Two UDP redundancy channels.
+- Five paced Ping/Pong rounds.
+- External SBB checkout mounted through `SBB_HOST_ROOT`.
+
 ## Test steps
-Build images, start peers, run handshake and ping-pong checks.
-## Expected result
-Rust and SBB interoperate using documented values.
-## Postconditions
-Containers stop and evidence logs are retained.
+
+1. Run the Rust workspace test service.
+2. Build and test the SBB wrapper service.
+3. Start the live compose profile.
+4. Confirm both peers report five successful rounds.
+
+## Actual result
+
+**PASS.** Docker/Podman Rust tests, SBB wrapper build/tests, and the live
+five-round Rust-to-SBB scenario passed.
+
 ## Evidence
-Future Docker logs.
-## Automation status
-Planned; no Docker implementation in this phase.
+
+See [Docker interop](../../../docs/docker-interop.md), the
+[completed result](../../../interop/results/sbb-rust-ping-pong-5-rounds.md), and
+the detailed [container interoperability spec](../interoperability/docker-interop.md).
+
+## Scope
+
+The result reproduces the recorded controlled configuration. It does not
+establish certification, production readiness, an independent assessment, or
+full DIN conformance.

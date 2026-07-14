@@ -82,7 +82,9 @@ internals. Tracing is diagnostic evidence, not a safety assessment. See
 The `signal-controller` and `interlocking-controller` applications demonstrate
 bidirectional fixed-format application messages over the public endpoint API.
 They are educational examples, not operational signalling software. See the
-[signal/interlocking example](docs/signal-interlocking-example.md).
+[signal/interlocking example](docs/signal-interlocking-example.md) and the
+[EULYNX context](docs/eulynx-context.md). The examples do not implement full
+EULYNX SCI/PDI behavior or establish EULYNX compliance.
 
 ## SBB interoperability evidence
 
@@ -95,7 +97,10 @@ The controlled test campaign recorded these passed results:
 The SBB wrapper build and smoke-test evidence is documented in
 [SBB wrapper test evidence](docs/sbb-wrapper-test-evidence.md), with the overall
 result and commands in the
-[final interoperability summary](docs/final-interop-summary.md). These results
+[final interoperability summary](docs/final-interop-summary.md) and the captured
+run in the
+[completed five-round result](interop/results/sbb-rust-ping-pong-5-rounds.md).
+These results
 demonstrate interoperability under the recorded test conditions only. They do
 not establish certification, production readiness, or full DIN conformance.
 
@@ -200,6 +205,7 @@ RaSTA implementations live under [interop/](interop/):
 - [interop/test-plan.md](interop/test-plan.md)
 - [interop/profile-comparison.md](interop/profile-comparison.md)
 - [interop/packet-capture.md](interop/packet-capture.md)
+- [interop/results/sbb-rust-ping-pong-5-rounds.md](interop/results/sbb-rust-ping-pong-5-rounds.md)
 
 The node supports an optional `--trace-wire` flag and explicit interop address,
 port, and node-ID overrides while preserving the original
