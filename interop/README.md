@@ -1,80 +1,64 @@
 # Controlled interoperability harness
 
-This directory prepares a controlled interoperability campaign against an
-independent C or C++ RaSTA implementation.
+This directory contains the material and local wrapper used for controlled
+interoperability testing against the SBB RaSTA stack.
 
-No external interoperability has passed yet. Two instances of this Rust
-implementation are not independent interoperability evidence.
+Controlled interoperability evidence exists against the SBB RaSTA stack via the
+local SBB wrapper, under the recorded test configuration only. Two instances of
+this Rust implementation are not independent interoperability evidence.
 
 ## Peer implementation
 
-| Field | Value |
+| Field | Recorded value |
 |---|---|
-| Implementation name | Pending |
-| Repository/source location | Pending |
-| Language | C or C++ expected; pending selection |
-| Supported RaSTA version | Pending |
-| Build instructions | Pending |
-| Transport mapping | Pending |
-| Licence | Pending |
-| Configuration mechanism | Pending |
-| One/two channel support | Pending |
-| Safety-code options | Pending |
-| Redundancy CRC options | Pending |
+| Implementation name | SBB RaSTA stack via local wrapper |
+| Repository/source location | External local checkout, mounted via `SBB_HOST_ROOT` for Docker/Podman |
+| Language | C/C++ |
+| Supported RaSTA version | Protocol version `0303` in the inspected/observed SBB wrapper configuration; not a broad conformance claim |
+| Build instructions | See [sbb-wrapper/](sbb-wrapper/) and [Docker interop](../docs/docker-interop.md) |
+| Transport mapping | POSIX UDP wrapper with two redundancy channels |
+| Licence | External SBB repository; no licence is restated or inferred here |
+| Configuration mechanism | Wrapper/profile configuration matching `sbb-local` |
+| One/two channel support | Two channels in the captured tests |
+| Safety-code options | SBB-compatible local test configuration; see the [final interop summary](../docs/final-interop-summary.md) |
+| Redundancy CRC options | SBB-compatible local test configuration; see the [final interop summary](../docs/final-interop-summary.md) |
 
-Do not mark a profile parameter as matched until the peer configuration has
-been inspected directly.
+These entries describe the inspected peer and captured test setup. They do not
+assert capabilities or conformance beyond that setup.
 
-## Rust node quick start
+## Final status
 
-The original simple commands remain supported:
+- Native SBB-to-SBB Ping/Pong 5 rounds: passed.
+- Native Rust-to-SBB handshake/heartbeat: passed.
+- Native Rust-to-SBB Ping/Pong 5 rounds: passed.
+- Docker/Podman Rust tests: passed.
+- Docker/Podman SBB wrapper build/tests: passed.
+- Docker/Podman Rust-to-SBB 5-round Ping/Pong: passed.
 
-```bash
-cargo run -p rasta-node --release -- B <rust-or-peer-ip>
-cargo run -p rasta-node --release -- A <rust-or-peer-ip>
-```
+Commands, profiles, and the evidence scope are recorded in the
+[final interop summary](../docs/final-interop-summary.md). Container setup and
+reproduction instructions are in [Docker interop](../docs/docker-interop.md).
 
-Optional interop aids:
+## Safety and scope
 
-```text
---profile <academic|librasta-local>
---trace-wire
---local-ip <ip>
---channel-0-local-port <port>
---channel-0-remote-port <port>
---channel-1-local-port <port>
---channel-1-remote-port <port>
---local-id <decimal-or-0xhex>
---remote-id <decimal-or-0xhex>
-```
+This is controlled test evidence only. It is not certification, production
+readiness, an independent safety assessment, or proof of full DIN conformance.
+Operational use requires project-specific configuration management,
+verification, validation, a safety case, and independent assessment.
 
-Example librasta-local client run:
+`ChannelSupervisionFailure` diagnostics can appear during SBB interoperability
+runs, but they did not prevent successful five-round Rust-to-SBB Ping/Pong
+completion in the captured native and Docker/Podman evidence.
 
-```bash
-cargo run -p rasta-node --release -- A 127.0.0.1 --profile librasta-local --trace-wire
-```
+The `academic`, `librasta-local`, and `sbb-local` profiles are test profiles.
+Their identifiers, timing values, safety-code settings, CRC settings, and ports
+must not be treated as approved operational railway parameters.
 
-Example with tracing and explicit ports:
+## Interoperability resources
 
-```bash
-cargo run -p rasta-node --release -- A 192.0.2.20 \
-  --local-ip 192.0.2.10 \
-  --channel-0-local-port 5000 \
-  --channel-0-remote-port 5001 \
-  --channel-1-local-port 6000 \
-  --channel-1-remote-port 6001 \
-  --local-id 0x1234 \
-  --remote-id 0x5678 \
-  --trace-wire
-```
-
-The current profile is academic and non-production. Do not silently change it
-to match a peer. Record mismatches in `profile-comparison.md` first.
-
-## Documents
-
-- `test-plan.md` — phased test procedure
-- `profile-comparison.md` — Rust/peer configuration comparison
-- `packet-capture.md` — Wireshark/tcpdump support
-- `wire-checklist.md` — first failing packet comparison checklist
-- `results/template.md` — result capture template
+- [SBB wrapper](sbb-wrapper/) — POSIX UDP, RedL/SafRetL bridge, and Ping/Pong runtime
+- [Profile comparison](profile-comparison.md) — Rust/peer configuration comparison
+- [Test plan](test-plan.md) — phased controlled test procedure
+- [Packet capture](packet-capture.md) — Wireshark/tcpdump capture guidance
+- [Final interop summary](../docs/final-interop-summary.md) — final native and container status
+- [Docker interop](../docs/docker-interop.md) — Docker/Podman build and reproduction workflow
