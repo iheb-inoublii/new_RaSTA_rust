@@ -370,10 +370,12 @@ radef_RaStaReturnCode sbb_endpoint_read_message(SbbEndpoint *endpoint, SbbEndpoi
         uint32_t counter = 0U;
         SbbWrapperPayloadResult decode_result = sbb_wrapper_decode_ping_pong(payload, payload_length, &kind, &counter);
         if (decode_result == SBB_WRAPPER_PAYLOAD_OK) {
-            printf(
-                "[sbb-wrapper] received %s(%u)\n",
-                kind == SBB_WRAPPER_PAYLOAD_KIND_PING ? "Ping" : "Pong",
-                (unsigned int)counter);
+            if (endpoint->trace) {
+                printf(
+                    "[sbb-wrapper] received %s(%u)\n",
+                    kind == SBB_WRAPPER_PAYLOAD_KIND_PING ? "Ping" : "Pong",
+                    (unsigned int)counter);
+            }
             if (message != 0) {
                 message->kind = kind == SBB_WRAPPER_PAYLOAD_KIND_PING ? SBB_ENDPOINT_APP_PING : SBB_ENDPOINT_APP_PONG;
                 message->counter = counter;

@@ -4,14 +4,20 @@ use rasta_core::endpoint::{ConnectionStatus, RastaEndpoint, config_from_profile}
 use rasta_platform::std_clock::StdClock;
 use rasta_platform::udp::UdpSocketTransport;
 use std::env;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
 const DEFAULT_RUN_SECONDS: u64 = 30;
-const DEFAULT_ROUNDS: u32 = 10;
+const DEFAULT_WARMUP: u32 = 100;
+const DEFAULT_ROUNDS: u32 = 5_000;
+const DEFAULT_CSV_PATH: &str = "ping-pong-rtt.csv";
 const DEFAULT_PING_DELAY_MS: u64 = 0;
 const SBB_LOCAL_PING_DELAY_MS: u64 = 300;
+const PONG_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PING_DELAY_MS: u64 = 60_000;
 const MAX_RUN_SECONDS: u64 = 24 * 60 * 60;
 
@@ -39,7 +45,10 @@ struct Settings {
     remote_addr_b: String,
     sender_id: u32,
     remote_id: u32,
+    warmup: u32,
     rounds: u32,
+    csv_path: PathBuf,
+    quiet: bool,
     run_seconds: u64,
     ping_delay_ms: u64,
     trace: bool,
@@ -61,7 +70,7 @@ fn main() {
         Ok(settings) => settings,
         Err("missing arguments") => {
             println!(
-                "Usage: {} <active|passive> <remote_ip> [--rounds N] [--run-seconds N] [--ping-delay-ms N] [--profile academic|librasta-local|sbb-local] [--trace|--trace-wire] [channel port overrides]",
+                "Usage: {} <active|passive> <remote_ip> [--warmup N] [--rounds N] [--csv PATH] [--quiet] [--run-seconds N] [--ping-delay-ms N] [--profile academic|librasta-local|sbb-local] [--trace|--trace-wire] [channel port overrides]",
                 args[0]
             );
             return;
@@ -72,21 +81,24 @@ fn main() {
         }
     };
 
-    println!("Starting ping-pong-node {:?}", settings.role);
-    println!("Local ID: {}", settings.sender_id);
-    println!("Remote ID: {}", settings.remote_id);
-    println!("Profile: {:?}", settings.profile);
-    println!("Rounds: {}", settings.rounds);
-    println!("Run seconds: {}", settings.run_seconds);
-    println!("Ping delay ms: {}", settings.ping_delay_ms);
-    println!(
-        "Channel A: {} -> {}",
-        settings.local_addr_a, settings.remote_addr_a
-    );
-    println!(
-        "Channel B: {} -> {}",
-        settings.local_addr_b, settings.remote_addr_b
-    );
+    if !settings.quiet {
+        println!("Starting ping-pong-node {:?}", settings.role);
+        println!("Local ID: {}", settings.sender_id);
+        println!("Remote ID: {}", settings.remote_id);
+        println!("Profile: {:?}", settings.profile);
+        println!("Warm-up rounds: {}", settings.warmup);
+        println!("Measured rounds: {}", settings.rounds);
+        println!("Run seconds: {}", settings.run_seconds);
+        println!("Ping delay ms: {}", settings.ping_delay_ms);
+        println!(
+            "Channel A: {} -> {}",
+            settings.local_addr_a, settings.remote_addr_a
+        );
+        println!(
+            "Channel B: {} -> {}",
+            settings.local_addr_b, settings.remote_addr_b
+        );
+    }
 
     let mut endpoint = match build_endpoint(&settings) {
         Ok(endpoint) => endpoint,
@@ -104,67 +116,66 @@ fn main() {
     let start = Instant::now();
     let mut up_since: Option<Instant> = None;
     let mut last_status = endpoint.status();
-    let mut active_state = ActivePingPongState::new(Instant::now());
+    let mut active_state =
+        ActivePingPongState::new(Instant::now(), settings.warmup, settings.rounds);
     let ping_delay = Duration::from_millis(settings.ping_delay_ms);
-    let mut active_success = false;
 
     loop {
         if let Err(error) = endpoint.poll() {
-            println!("Error during poll: {error}");
-            endpoint
-                .drain_diagnostics(|diagnostic| eprintln!("RaSTA diagnostic: {:?}", diagnostic));
+            if settings.role == Role::Passive && !settings.quiet {
+                eprintln!("Error during poll: {error}");
+            }
             break;
         }
-        drain_trace(&mut endpoint, settings.trace);
+        let measuring = settings.role == Role::Active && active_state.is_measuring();
+        drain_trace(
+            &mut endpoint,
+            settings.trace && !settings.quiet && !measuring,
+        );
 
         let status = endpoint.status();
-        if status != last_status {
+        if status != last_status && !settings.quiet && !measuring {
             println!("State transition: {:?} -> {:?}", last_status, status);
-            last_status = status;
         }
+        last_status = status;
         if status == ConnectionStatus::Up && up_since.is_none() {
             up_since = Some(Instant::now());
         }
 
         if status == ConnectionStatus::Up {
             match settings.role {
-                Role::Active => run_active(
-                    &mut endpoint,
-                    settings.rounds,
-                    &mut active_state,
-                    ping_delay,
-                ),
+                Role::Active => run_active(&mut endpoint, &mut active_state, ping_delay),
                 Role::Passive => run_passive(&mut endpoint),
             }
         }
 
-        if settings.role == Role::Active && active_state.is_complete(settings.rounds) {
-            active_success = true;
-            println!("Completed {} ping-pong rounds", settings.rounds);
-            println!("Graceful disconnect...");
-            if let Err(error) = endpoint.close() {
-                eprintln!("Failed to disconnect: {error}");
-            }
+        if settings.role == Role::Active && active_state.is_complete() {
+            let _ = endpoint.close();
             break;
         }
 
         if start.elapsed() >= Duration::from_secs(settings.run_seconds) {
             if settings.role == Role::Active {
-                println!("Run duration expired; graceful disconnect...");
-                if let Err(error) = endpoint.close() {
-                    eprintln!("Failed to disconnect: {error}");
-                }
+                let _ = endpoint.close();
             }
             break;
         }
 
-        thread::sleep(Duration::from_millis(10));
+        if status != ConnectionStatus::Up {
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     if settings.role == Role::Active {
+        let _ = write_csv(&settings.csv_path, active_state.rtts());
+        let successful_rounds = active_state.rtts().len();
         println!(
-            "active summary: sent_pings={} received_pongs={} success={}",
-            active_state.sent_pings, active_state.received_pongs, active_success
+            "benchmark summary: warmup_rounds={} measured_rounds={} successful_rounds={} failed_or_timed_out_rounds={} csv_output_path={}",
+            settings.warmup,
+            settings.rounds,
+            successful_rounds,
+            settings.rounds as usize - successful_rounds,
+            settings.csv_path.display()
         );
     }
 }
@@ -172,58 +183,87 @@ fn main() {
 #[derive(Clone, Debug)]
 struct ActivePingPongState {
     next_ping: u32,
-    next_pong: u32,
-    waiting_for_pong: bool,
+    warmup: u32,
+    rounds: u32,
+    sent_at: Option<Instant>,
     next_ping_at: Instant,
-    sent_pings: u32,
-    received_pongs: u32,
+    rtts_ns: Vec<u64>,
 }
 
 impl ActivePingPongState {
-    fn new(now: Instant) -> Self {
+    fn new(now: Instant, warmup: u32, rounds: u32) -> Self {
         Self {
             next_ping: 1,
-            next_pong: 1,
-            waiting_for_pong: false,
+            warmup,
+            rounds,
+            sent_at: None,
             next_ping_at: now,
-            sent_pings: 0,
-            received_pongs: 0,
+            rtts_ns: Vec::with_capacity(rounds as usize),
         }
     }
 
-    fn should_send_ping(&self, rounds: u32, now: Instant) -> bool {
-        !self.waiting_for_pong && self.next_ping <= rounds && now >= self.next_ping_at
+    fn total_rounds(&self) -> u32 {
+        self.warmup + self.rounds
+    }
+
+    fn should_send_ping(&self, now: Instant) -> bool {
+        self.sent_at.is_none() && self.next_ping <= self.total_rounds() && now >= self.next_ping_at
     }
 
     fn current_ping(&self) -> u32 {
         self.next_ping
     }
 
-    fn record_ping_sent(&mut self) {
-        self.waiting_for_pong = true;
-        self.sent_pings = self.sent_pings.saturating_add(1);
+    fn record_ping_sent(&mut self, sent_at: Instant) {
+        self.sent_at = Some(sent_at);
     }
 
     fn record_expected_pong(&mut self, counter: u32, now: Instant, ping_delay: Duration) -> bool {
-        if counter != self.next_pong {
+        if counter != self.next_ping {
             return false;
         }
-        self.next_ping = self.next_ping.saturating_add(1);
-        self.next_pong = self.next_pong.saturating_add(1);
-        self.received_pongs = self.received_pongs.saturating_add(1);
-        self.waiting_for_pong = false;
-        self.next_ping_at = now + ping_delay;
+
+        let Some(sent_at) = self.sent_at.take() else {
+            return false;
+        };
+        if counter > self.warmup {
+            let nanos = now.duration_since(sent_at).as_nanos();
+            self.rtts_ns.push(nanos.min(u128::from(u64::MAX)) as u64);
+        }
+        self.advance(now, ping_delay);
         true
     }
 
-    fn is_complete(&self, rounds: u32) -> bool {
-        self.received_pongs >= rounds
+    fn record_failed_round(&mut self, now: Instant, ping_delay: Duration) {
+        self.sent_at = None;
+        self.advance(now, ping_delay);
+    }
+
+    fn advance(&mut self, now: Instant, ping_delay: Duration) {
+        self.next_ping = self.next_ping.saturating_add(1);
+        self.next_ping_at = now + ping_delay;
+    }
+
+    fn pong_timed_out(&self, now: Instant) -> bool {
+        self.sent_at
+            .is_some_and(|sent_at| now.duration_since(sent_at) >= PONG_TIMEOUT)
+    }
+
+    fn is_measuring(&self) -> bool {
+        self.next_ping > self.warmup && self.next_ping <= self.total_rounds()
+    }
+
+    fn is_complete(&self) -> bool {
+        self.next_ping > self.total_rounds()
+    }
+
+    fn rtts(&self) -> &[u64] {
+        &self.rtts_ns
     }
 }
 
 fn run_active<T1, T2, C>(
     endpoint: &mut RastaEndpoint<T1, T2, C>,
-    rounds: u32,
     state: &mut ActivePingPongState,
     ping_delay: Duration,
 ) where
@@ -232,33 +272,34 @@ fn run_active<T1, T2, C>(
     C: rasta_core::time::MonotonicClock + rasta_core::time::ProtocolTimestampSource,
 {
     let now = Instant::now();
-    if state.should_send_ping(rounds, now) {
+    if state.pong_timed_out(now) {
+        state.record_failed_round(now, ping_delay);
+    }
+
+    if state.should_send_ping(now) {
         let counter = state.current_ping();
-        send_message(endpoint, ApplicationMessage::Ping { counter });
-        println!("Ping({counter}) sent");
-        state.record_ping_sent();
+        let mut buffer = [0u8; ApplicationMessage::MAX_ENCODED_LEN];
+        if let Ok(length) = (ApplicationMessage::Ping { counter }).encode(&mut buffer) {
+            let sent_at = Instant::now();
+            let send_result = endpoint.send(&buffer[..length]);
+            state.record_ping_sent(sent_at);
+            if send_result.is_err() {
+                state.record_failed_round(Instant::now(), ping_delay);
+            }
+        }
     }
 
     let mut buffer = [0u8; ApplicationMessage::MAX_ENCODED_LEN];
     while endpoint.has_received_data() {
         match endpoint.receive(&mut buffer) {
-            Ok(length) => match ApplicationMessage::decode(&buffer[..length]) {
-                Ok(ApplicationMessage::Pong { counter }) => {
-                    println!("Pong({counter}) received");
-                    if !state.record_expected_pong(counter, Instant::now(), ping_delay) {
-                        eprintln!(
-                            "Unexpected Pong counter: expected {}, got {counter}",
-                            state.next_pong
-                        );
-                    }
+            Ok(length) => {
+                if let Ok(ApplicationMessage::Pong { counter }) =
+                    ApplicationMessage::decode(&buffer[..length])
+                {
+                    let _ = state.record_expected_pong(counter, Instant::now(), ping_delay);
                 }
-                Ok(other) => eprintln!("Unexpected active message: {:?}", other),
-                Err(error) => eprintln!("Malformed active message: {:?}", error),
-            },
-            Err(error) => {
-                eprintln!("Receive failed: {error}");
-                break;
             }
+            Err(_) => break,
         }
     }
 }
@@ -274,9 +315,7 @@ where
         match endpoint.receive(&mut buffer) {
             Ok(length) => match ApplicationMessage::decode(&buffer[..length]) {
                 Ok(ApplicationMessage::Ping { counter }) => {
-                    println!("Ping({counter}) received");
-                    send_message(endpoint, ApplicationMessage::Pong { counter });
-                    println!("Pong({counter}) sent");
+                    let _ = send_message(endpoint, ApplicationMessage::Pong { counter });
                 }
                 Ok(other) => eprintln!("Unexpected passive message: {:?}", other),
                 Err(error) => eprintln!("Malformed passive message: {:?}", error),
@@ -289,21 +328,34 @@ where
     }
 }
 
-fn send_message<T1, T2, C>(endpoint: &mut RastaEndpoint<T1, T2, C>, message: ApplicationMessage)
+fn send_message<T1, T2, C>(
+    endpoint: &mut RastaEndpoint<T1, T2, C>,
+    message: ApplicationMessage,
+) -> Result<(), ()>
 where
     T1: rasta_core::port::RastaTransport,
     T2: rasta_core::port::RastaTransport,
     C: rasta_core::time::MonotonicClock + rasta_core::time::ProtocolTimestampSource,
 {
     let mut buffer = [0u8; ApplicationMessage::MAX_ENCODED_LEN];
-    match message.encode(&mut buffer) {
-        Ok(length) => {
-            if let Err(error) = endpoint.send(&buffer[..length]) {
-                eprintln!("Send failed: {error}");
-            }
-        }
-        Err(error) => eprintln!("Encode failed: {:?}", error),
+    let length = message.encode(&mut buffer).map_err(|_| ())?;
+    endpoint.send(&buffer[..length]).map_err(|_| ())
+}
+
+fn write_csv(path: &Path, rtts_ns: &[u64]) -> std::io::Result<()> {
+    let mut writer = BufWriter::new(File::create(path)?);
+    writeln!(writer, "round,rtt_ns,rtt_us,rtt_ms")?;
+    for (index, rtt_ns) in rtts_ns.iter().enumerate() {
+        writeln!(
+            writer,
+            "{},{},{:.3},{:.6}",
+            index + 1,
+            rtt_ns,
+            *rtt_ns as f64 / 1_000.0,
+            *rtt_ns as f64 / 1_000_000.0
+        )?;
     }
+    writer.flush()
 }
 
 fn build_endpoint(
@@ -357,7 +409,10 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
     let local_ip = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     let mut profile = RuntimeProfile::Academic;
     let mut endpoint = defaults(role, profile);
+    let mut warmup = DEFAULT_WARMUP;
     let mut rounds = DEFAULT_ROUNDS;
+    let mut csv_path = PathBuf::from(DEFAULT_CSV_PATH);
+    let mut quiet = false;
     let mut run_seconds = DEFAULT_RUN_SECONDS;
     let mut ping_delay_ms = default_ping_delay_ms(profile);
     let mut trace = false;
@@ -374,6 +429,20 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
             "--rounds" => {
                 index += 1;
                 rounds = parse_rounds(args.get(index).ok_or("missing option value")?)?;
+                index += 1;
+            }
+            "--warmup" => {
+                index += 1;
+                warmup = parse_warmup(args.get(index).ok_or("missing option value")?)?;
+                index += 1;
+            }
+            "--csv" => {
+                index += 1;
+                csv_path = parse_csv_path(args.get(index).ok_or("missing option value")?)?;
+                index += 1;
+            }
+            "--quiet" => {
+                quiet = true;
                 index += 1;
             }
             "--run-seconds" => {
@@ -421,6 +490,9 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
     if endpoint.channel_0_local_port == endpoint.channel_1_local_port {
         return Err("duplicate local ports");
     }
+    if warmup.checked_add(rounds).is_none() {
+        return Err("too many total rounds");
+    }
     Ok(Settings {
         role,
         remote_ip,
@@ -431,7 +503,10 @@ fn parse_settings(args: &[String]) -> Result<Settings, &'static str> {
         remote_addr_b: socket_addr(remote_ip, endpoint.channel_1_remote_port),
         sender_id: endpoint.sender_id,
         remote_id: endpoint.remote_id,
+        warmup,
         rounds,
+        csv_path,
+        quiet,
         run_seconds,
         ping_delay_ms,
         trace,
@@ -516,6 +591,17 @@ fn parse_rounds(value: &str) -> Result<u32, &'static str> {
     Ok(rounds)
 }
 
+fn parse_warmup(value: &str) -> Result<u32, &'static str> {
+    value.parse::<u32>().map_err(|_| "invalid warmup")
+}
+
+fn parse_csv_path(value: &str) -> Result<PathBuf, &'static str> {
+    if value.is_empty() {
+        return Err("invalid csv path");
+    }
+    Ok(PathBuf::from(value))
+}
+
 fn parse_run_seconds(value: &str) -> Result<u64, &'static str> {
     let seconds = value.parse::<u64>().map_err(|_| "invalid run seconds")?;
     if seconds == 0 || seconds > MAX_RUN_SECONDS {
@@ -546,9 +632,10 @@ fn parse_port(value: &str) -> Result<u16, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActivePingPongState, DEFAULT_PING_DELAY_MS, DEFAULT_ROUNDS, Role, RuntimeProfile,
-        SBB_LOCAL_PING_DELAY_MS, parse_settings,
+        ActivePingPongState, DEFAULT_CSV_PATH, DEFAULT_PING_DELAY_MS, DEFAULT_ROUNDS,
+        DEFAULT_WARMUP, Role, RuntimeProfile, SBB_LOCAL_PING_DELAY_MS, parse_settings, write_csv,
     };
+    use std::fs;
     use std::time::{Duration, Instant};
 
     fn args(values: &[&str]) -> Vec<String> {
@@ -560,12 +647,37 @@ mod tests {
         let settings = parse_settings(&args(&["ping-pong-node", "active", "127.0.0.1"])).unwrap();
         assert_eq!(settings.role, Role::Active);
         assert_eq!(settings.profile, RuntimeProfile::Academic);
+        assert_eq!(settings.warmup, DEFAULT_WARMUP);
         assert_eq!(settings.rounds, DEFAULT_ROUNDS);
+        assert_eq!(settings.csv_path.to_string_lossy(), DEFAULT_CSV_PATH);
+        assert!(!settings.quiet);
         assert_eq!(settings.ping_delay_ms, DEFAULT_PING_DELAY_MS);
         assert_eq!(settings.local_addr_a, "0.0.0.0:5000");
         assert_eq!(settings.remote_addr_a, "127.0.0.1:5001");
         assert_eq!(settings.sender_id, 0x1234);
         assert_eq!(settings.remote_id, 0x5678);
+    }
+
+    #[test]
+    fn parses_benchmark_arguments() {
+        let settings = parse_settings(&args(&[
+            "ping-pong-node",
+            "active",
+            "127.0.0.1",
+            "--warmup",
+            "25",
+            "--rounds",
+            "2000",
+            "--csv",
+            "/tmp/rasta-rtt.csv",
+            "--quiet",
+        ]))
+        .unwrap();
+
+        assert_eq!(settings.warmup, 25);
+        assert_eq!(settings.rounds, 2000);
+        assert_eq!(settings.csv_path.to_string_lossy(), "/tmp/rasta-rtt.csv");
+        assert!(settings.quiet);
     }
 
     #[test]
@@ -720,20 +832,63 @@ mod tests {
     fn active_ping_pong_state_machine_sends_next_ping_only_after_pong() {
         let now = Instant::now();
         let delay = Duration::from_millis(SBB_LOCAL_PING_DELAY_MS);
-        let mut state = ActivePingPongState::new(now);
+        let mut state = ActivePingPongState::new(now, 0, 5);
 
-        assert!(state.should_send_ping(5, now));
+        assert!(state.should_send_ping(now));
         assert_eq!(state.current_ping(), 1);
 
-        state.record_ping_sent();
-        assert!(!state.should_send_ping(5, now + delay));
+        state.record_ping_sent(now);
+        assert!(!state.should_send_ping(now + delay));
 
         assert!(!state.record_expected_pong(2, now, delay));
-        assert!(!state.should_send_ping(5, now + delay));
+        assert!(!state.should_send_ping(now + delay));
 
         assert!(state.record_expected_pong(1, now, delay));
-        assert!(!state.should_send_ping(5, now + delay - Duration::from_millis(1)));
-        assert!(state.should_send_ping(5, now + delay));
+        assert!(!state.should_send_ping(now + delay - Duration::from_millis(1)));
+        assert!(state.should_send_ping(now + delay));
         assert_eq!(state.current_ping(), 2);
+    }
+
+    #[test]
+    fn discards_warmup_and_creates_requested_measured_samples() {
+        let start = Instant::now();
+        let mut state = ActivePingPongState::new(start, 2, 3);
+
+        for counter in 1..=5 {
+            let sent_at = start + Duration::from_millis(u64::from(counter));
+            state.record_ping_sent(sent_at);
+            assert!(state.record_expected_pong(
+                counter,
+                sent_at + Duration::from_nanos(u64::from(counter)),
+                Duration::ZERO,
+            ));
+        }
+
+        assert!(state.is_complete());
+        assert_eq!(state.rtts(), &[3, 4, 5]);
+    }
+
+    #[test]
+    fn matches_ping_and_pong_sequence_numbers() {
+        let now = Instant::now();
+        let mut state = ActivePingPongState::new(now, 0, 1);
+        state.record_ping_sent(now);
+
+        assert!(!state.record_expected_pong(2, now + Duration::from_nanos(1), Duration::ZERO));
+        assert!(state.record_expected_pong(1, now + Duration::from_nanos(2), Duration::ZERO));
+        assert_eq!(state.rtts(), &[2]);
+    }
+
+    #[test]
+    fn csv_has_expected_header_and_row_count() {
+        let path =
+            std::env::temp_dir().join(format!("ping-pong-node-{}-rtt.csv", std::process::id()));
+        write_csv(&path, &[10, 20, 30]).unwrap();
+        let contents = fs::read_to_string(&path).unwrap();
+        fs::remove_file(path).unwrap();
+
+        let rows: Vec<_> = contents.lines().collect();
+        assert_eq!(rows[0], "round,rtt_ns,rtt_us,rtt_ms");
+        assert_eq!(rows.len(), 4);
     }
 }

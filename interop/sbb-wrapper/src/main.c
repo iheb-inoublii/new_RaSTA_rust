@@ -277,7 +277,9 @@ int main(int argc, char **argv)
                 result = sbb_endpoint_send_pong(&endpoint, message.counter);
                 if (result == radef_kNoError) {
                     sent_pongs += 1u;
-                    printf("[sbb-wrapper] sent Pong(%u)\n", (unsigned int)message.counter);
+                    if (settings.trace) {
+                        printf("[sbb-wrapper] sent Pong(%u)\n", (unsigned int)message.counter);
+                    }
                 } else {
                     printf(
                         "[sbb-wrapper] Pong(%u) not sent result=%d(%s)\n",
