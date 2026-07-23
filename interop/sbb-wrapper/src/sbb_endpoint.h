@@ -5,6 +5,8 @@
 
 #include <stdint.h>
 
+struct timespec;
+
 #define SBB_WRAPPER_SAFRETL_NETWORK_ID 123456u
 #define SBB_WRAPPER_SAFRETL_SENDER_ID 0x61u
 #define SBB_WRAPPER_SAFRETL_RECEIVER_ID 0x62u
@@ -43,6 +45,10 @@ radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint);
 radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t counter);
+radef_RaStaReturnCode sbb_endpoint_send_ping_timed(
+    SbbEndpoint *endpoint,
+    uint32_t counter,
+    struct timespec *started_at);
 radef_RaStaReturnCode sbb_endpoint_send_pong(SbbEndpoint *endpoint, uint32_t counter);
 radef_RaStaReturnCode sbb_endpoint_read_message(SbbEndpoint *endpoint, SbbEndpointAppMessage *message);
 radef_RaStaReturnCode sbb_endpoint_read(SbbEndpoint *endpoint);

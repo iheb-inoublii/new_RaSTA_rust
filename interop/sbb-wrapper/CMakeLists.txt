@@ -36,6 +36,7 @@ endif()
 add_library(sbb_wrapper_common OBJECT
     src/ping_pong_payload.c
     src/ping_pong_responder.c
+    src/rtt_benchmark.c
     src/sbb_adapter.c
     src/sbb_diagnostics.c
     src/sbb_endpoint.c
@@ -43,6 +44,7 @@ add_library(sbb_wrapper_common OBJECT
     src/sbb_safety_notifications.c
     src/sbb_system_adapter.c
     src/udp_transport.c
+    src/wrapper_settings.c
 )
 
 target_include_directories(sbb_wrapper_common
@@ -132,3 +134,19 @@ add_executable(buffered_diagnostics_test
 target_link_libraries(buffered_diagnostics_test PRIVATE sbb_wrapper_common)
 
 add_test(NAME buffered_diagnostics_test COMMAND buffered_diagnostics_test)
+
+add_executable(wrapper_settings_test
+    tests/wrapper_settings_test.c
+)
+
+target_link_libraries(wrapper_settings_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME wrapper_settings_test COMMAND wrapper_settings_test)
+
+add_executable(rtt_benchmark_test
+    tests/rtt_benchmark_test.c
+)
+
+target_link_libraries(rtt_benchmark_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME rtt_benchmark_test COMMAND rtt_benchmark_test)

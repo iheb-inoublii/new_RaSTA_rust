@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "sbb_endpoint.h"
 
 #include "ping_pong_payload.h"
@@ -6,6 +8,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
 #include "rasta_safety_retransmission/srapi_sr_api.h"
@@ -305,7 +308,8 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
 static radef_RaStaReturnCode sbb_endpoint_send_payload(
     SbbEndpoint *endpoint,
     uint32_t counter,
-    int is_ping)
+    int is_ping,
+    struct timespec *started_at)
 {
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     uint8_t payload[SBB_WRAPPER_PING_PONG_PAYLOAD_LEN] = {0};
@@ -323,24 +327,11 @@ static radef_RaStaReturnCode sbb_endpoint_send_payload(
     }
 
     sbb_wrapper_diag_set_phase(is_ping ? "sbb_endpoint_send_ping:srapi_SendData" : "sbb_endpoint_send_pong:srapi_SendData");
+    if (started_at != 0 && clock_gettime(CLOCK_MONOTONIC, started_at) != 0) {
+        return radef_kInternalError;
+    }
     result = srapi_SendData(endpoint->connection_id, (uint16_t)payload_length, payload);
     sbb_wrapper_diag_observe_send_data_result(result);
-    if (result == radef_kNoError) {
-        sraty_ConnectionStates state = sraty_kConnectionNotInitialized;
-        sraty_BufferUtilisation buffer_utilisation = {0};
-        uint16_t opposite_buffer_size = 0U;
-        if (srapi_GetConnectionState(
-                endpoint->connection_id,
-                &state,
-                &buffer_utilisation,
-                &opposite_buffer_size) == radef_kNoError) {
-            sbb_wrapper_diag_observe_connection_snapshot(
-                (int)state,
-                buffer_utilisation.send_buffer_used,
-                buffer_utilisation.receive_buffer_used,
-                opposite_buffer_size);
-        }
-    }
     if (endpoint->trace) {
         printf(
             "[sbb-wrapper] srapi_SendData %s(%u) result=%d(%s)\n",
@@ -354,18 +345,27 @@ static radef_RaStaReturnCode sbb_endpoint_send_payload(
     (void)endpoint;
     (void)counter;
     (void)is_ping;
+    (void)started_at;
     return radef_kNotInitialized;
 #endif
 }
 
 radef_RaStaReturnCode sbb_endpoint_send_ping(SbbEndpoint *endpoint, uint32_t counter)
 {
-    return sbb_endpoint_send_payload(endpoint, counter, 1);
+    return sbb_endpoint_send_payload(endpoint, counter, 1, 0);
+}
+
+radef_RaStaReturnCode sbb_endpoint_send_ping_timed(
+    SbbEndpoint *endpoint,
+    uint32_t counter,
+    struct timespec *started_at)
+{
+    return sbb_endpoint_send_payload(endpoint, counter, 1, started_at);
 }
 
 radef_RaStaReturnCode sbb_endpoint_send_pong(SbbEndpoint *endpoint, uint32_t counter)
 {
-    return sbb_endpoint_send_payload(endpoint, counter, 0);
+    return sbb_endpoint_send_payload(endpoint, counter, 0, 0);
 }
 
 radef_RaStaReturnCode sbb_endpoint_read_message(SbbEndpoint *endpoint, SbbEndpointAppMessage *message)

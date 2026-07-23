@@ -46,6 +46,49 @@ During a quiet run, state, buffer use, API results, disconnect data, SafRetL
 error counters, and timeout-branch counts are retained in fixed-size globals.
 They are printed only after the application loop terminates.
 
+## SBB-to-SBB RTT Benchmark
+
+The existing active role is the RTT initiator and the existing passive role
+returns matching five-byte Pong payloads. Active defaults to 100 warm-ups,
+5,000 measured rounds, and zero artificial delay. It allocates the exact RTT
+sample buffer once before opening the connection. Warm-up values are discarded,
+and the CSV is opened only after every measured round succeeds.
+
+Start passive from the Rust repository root:
+
+```sh
+mkdir -p benchmark-results/sbb-to-sbb
+./interop/sbb-wrapper/build/sbb-rasta-wrapper \
+  passive 127.0.0.1 \
+  --warmup 100 \
+  --rounds 5000 \
+  --ping-delay-ms 0 \
+  --run-seconds 600 \
+  --channel0-local 7000 \
+  --channel0-remote 7100 \
+  --channel1-local 7001 \
+  --channel1-remote 7101
+```
+
+Start active in a second terminal:
+
+```sh
+./interop/sbb-wrapper/build/sbb-rasta-wrapper \
+  active 127.0.0.1 \
+  --warmup 100 \
+  --rounds 5000 \
+  --csv benchmark-results/sbb-to-sbb/run-01-zero-delay.csv \
+  --ping-delay-ms 0 \
+  --run-seconds 600 \
+  --channel0-local 7100 \
+  --channel0-remote 7000 \
+  --channel1-local 7101 \
+  --channel1-remote 7001
+```
+
+Do not add `--trace` to benchmark runs. With tracing disabled, each process
+prints one final summary and no per-exchange output. Only active writes a CSV.
+
 ## Step 8D Kali Verification
 
 Intended Kali verification from the Rust repository root:
