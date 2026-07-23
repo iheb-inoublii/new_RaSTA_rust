@@ -1,0 +1,17 @@
+#ifndef SBB_WRAPPER_SBB_TIMEOUT_INSTRUMENTATION_H
+#define SBB_WRAPPER_SBB_TIMEOUT_INSTRUMENTATION_H
+
+#include <stdint.h>
+
+typedef enum SbbWrapperTimeoutBranch {
+    SBB_WRAPPER_TIMEOUT_START_EVENT = 0,
+    SBB_WRAPPER_TIMEOUT_UP_EVENT = 1,
+    SBB_WRAPPER_TIMEOUT_RETRANS_REQUEST_EVENT = 2,
+    SBB_WRAPPER_TIMEOUT_RETRANS_RUNNING_EVENT = 3,
+    SBB_WRAPPER_TIMEOUT_RECEIVED_MESSAGE_TIMELINESS = 4,
+    SBB_WRAPPER_TIMEOUT_BRANCH_COUNT = 5
+} SbbWrapperTimeoutBranch;
+
+void sbb_wrapper_diag_note_timeout_branch(uint32_t connection_id, uint32_t branch);
+
+#endif

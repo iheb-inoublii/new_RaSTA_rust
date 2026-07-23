@@ -55,7 +55,13 @@ void srnot_ConnectionStateNotification(
             sbb_wrapper_disconnect_reason_name((int)disconnect_reason),
             (unsigned int)detailed_disconnect_reason);
     }
-    sbb_wrapper_diag_observe_connection_state((int)connection_state);
+    sbb_wrapper_diag_observe_connection_notification(
+        (int)connection_state,
+        buffer_utilisation.send_buffer_used,
+        buffer_utilisation.receive_buffer_used,
+        opposite_buffer_size,
+        (int)disconnect_reason,
+        detailed_disconnect_reason);
     if (sbb_wrapper_diag_closed_after_up() && sbb_wrapper_udp_trace_enabled()) {
         puts("[sbb-wrapper] srnot_ConnectionStateNotification observed Closed after Up; stopping SBB baseline polling");
     }
@@ -65,6 +71,12 @@ void srnot_SrDiagnosticNotification(
     const uint32_t connection_id,
     const sraty_ConnectionDiagnosticData connection_diagnostic_data)
 {
+    sbb_wrapper_diag_observe_protocol_counters(
+        connection_diagnostic_data.ec_safety,
+        connection_diagnostic_data.ec_address,
+        connection_diagnostic_data.ec_type,
+        connection_diagnostic_data.ec_sn,
+        connection_diagnostic_data.ec_csn);
     if (sbb_wrapper_udp_trace_enabled()) {
         printf(
             "[sbb-wrapper] srnot_SrDiagnosticNotification connection=%u ec_safety=%u ec_address=%u ec_type=%u ec_sn=%u ec_csn=%u\n",

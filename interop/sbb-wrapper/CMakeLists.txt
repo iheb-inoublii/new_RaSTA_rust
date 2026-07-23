@@ -17,11 +17,19 @@ else()
 endif()
 
 if(SBB_WRAPPER_HAS_SBB_REDL)
+    set(_sbb_wrapper_state_machine "${SBB_ROOT}/source/modules/rasta_safety_retransmission/src/srstm_sr_state_machine.c")
+    file(READ "${_sbb_wrapper_state_machine}" _sbb_wrapper_state_machine_source)
+    string(FIND "${_sbb_wrapper_state_machine_source}" "sbb_wrapper_diag_note_timeout_branch" _sbb_wrapper_timeout_hook_index)
+    if(_sbb_wrapper_timeout_hook_index EQUAL -1)
+        message(FATAL_ERROR
+            "SBB timeout branch instrumentation is missing. Apply interop/sbb-wrapper/sbb-timeout-instrumentation.patch to SBB_ROOT before configuring.")
+    endif()
     set(_sbb_wrapper_previous_build_testing ${BUILD_TESTING})
     set(BUILD_TESTING OFF CACHE BOOL "Disable external SBB tests while embedding SBB libraries" FORCE)
     add_subdirectory("${SBB_ROOT}/source/modules/rasta_common" "${CMAKE_BINARY_DIR}/sbb-rasta-common")
     add_subdirectory("${SBB_ROOT}/source/modules/rasta_redundancy" "${CMAKE_BINARY_DIR}/sbb-rasta-redundancy")
     add_subdirectory("${SBB_ROOT}/source/modules/rasta_safety_retransmission" "${CMAKE_BINARY_DIR}/sbb-rasta-safety-retransmission")
+    target_include_directories(rasta_safety_retransmission PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     set(BUILD_TESTING ${_sbb_wrapper_previous_build_testing} CACHE BOOL "Restore wrapper testing setting" FORCE)
 endif()
 
@@ -116,3 +124,11 @@ add_executable(trace_disabled_output_test
 target_link_libraries(trace_disabled_output_test PRIVATE sbb_wrapper_common)
 
 add_test(NAME trace_disabled_output_test COMMAND trace_disabled_output_test)
+
+add_executable(buffered_diagnostics_test
+    tests/buffered_diagnostics_test.c
+)
+
+target_link_libraries(buffered_diagnostics_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME buffered_diagnostics_test COMMAND buffered_diagnostics_test)

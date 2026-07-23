@@ -290,6 +290,7 @@ int main(int argc, char **argv)
                 result = sbb_endpoint_send_pong(&endpoint, pong_counter);
                 if (result == radef_kNoError) {
                     sbb_wrapper_responder_note_pong_sent(&responder);
+                    sbb_wrapper_diag_observe_successful_ping(pong_counter);
                     if (settings.trace) {
                         printf("[sbb-wrapper] sent Pong(%u)\n", (unsigned int)pong_counter);
                     }
@@ -357,13 +358,12 @@ int main(int argc, char **argv)
             received_pongs,
             application_success ? "true" : "false");
     } else {
-        printf(
-            "[sbb-wrapper] passive summary: requested_rounds=%u received_pings=%u sent_pongs=%u malformed_or_mismatched=%u success=%s\n",
+        sbb_wrapper_diag_print_final(
             responder.requested_rounds,
             responder.received_pings,
             responder.sent_pongs,
             responder.malformed_or_mismatched,
-            application_success ? "true" : "false");
+            application_success);
     }
 
     sbb_wrapper_diag_set_phase("main:close");

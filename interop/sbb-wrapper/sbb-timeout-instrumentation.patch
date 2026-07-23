@@ -1,0 +1,52 @@
+diff --git a/source/modules/rasta_safety_retransmission/src/srstm_sr_state_machine.c b/source/modules/rasta_safety_retransmission/src/srstm_sr_state_machine.c
+index e808872..f70d5f4 100644
+--- a/source/modules/rasta_safety_retransmission/src/srstm_sr_state_machine.c
++++ b/source/modules/rasta_safety_retransmission/src/srstm_sr_state_machine.c
+@@ -23,6 +23,7 @@
+ #include "rasta_common/ralog_rasta_logger.h"
+ #include "rasta_common/rasys_rasta_system_adapter.h"
+ #include "rasta_safety_retransmission/sraty_sr_api_types.h"
++#include "sbb_timeout_instrumentation.h"
+ #include "srcor_sr_core.h"   // NOLINT(build/include_subdir)
+ #include "srtyp_sr_types.h"  // NOLINT(build/include_subdir)
+ 
+@@ -514,6 +515,7 @@ static void ProcessStateStartEvents(const uint32_t connection_id, const srtyp_Co
+       }
+       break;
+     case srtyp_kConnEventTimeout:
++      sbb_wrapper_diag_note_timeout_branch(connection_id, SBB_WRAPPER_TIMEOUT_START_EVENT);
+       CloseConnection(connection_id, sraty_kDiscReasonTimeout, true);  // [1] Close connection
+       break;
+     case srtyp_kConnEventNone:  // fall-through
+@@ -590,6 +592,7 @@ static void ProcessStateUpEvents(const uint32_t connection_id, const srtyp_Conne
+       // Remain in same state
+       break;
+     case srtyp_kConnEventTimeout:
++      sbb_wrapper_diag_note_timeout_branch(connection_id, SBB_WRAPPER_TIMEOUT_UP_EVENT);
+       CloseConnection(connection_id, sraty_kDiscReasonTimeout, true);  // [1] Close connection
+       break;
+     case srtyp_kConnEventNone:  // fall-through
+@@ -655,6 +658,7 @@ static void ProcessStateRetransRequestEvents(const uint32_t connection_id, const
+       // Remain in same state
+       break;
+     case srtyp_kConnEventTimeout:
++      sbb_wrapper_diag_note_timeout_branch(connection_id, SBB_WRAPPER_TIMEOUT_RETRANS_REQUEST_EVENT);
+       CloseConnection(connection_id, sraty_kDiscReasonTimeout, true);  // [1] Close connection
+       break;
+     case srtyp_kConnEventNone:  // fall-through
+@@ -731,6 +735,7 @@ static void ProcessStateRetransRunningEvents(const uint32_t connection_id, const
+       // Remain in same state
+       break;
+     case srtyp_kConnEventTimeout:
++      sbb_wrapper_diag_note_timeout_branch(connection_id, SBB_WRAPPER_TIMEOUT_RETRANS_RUNNING_EVENT);
+       CloseConnection(connection_id, sraty_kDiscReasonTimeout, true);  // [1] Close connection
+       break;
+     case srtyp_kConnEventNone:  // fall-through
+@@ -748,6 +753,7 @@ static bool ProcessReceivedMessage(const uint32_t connection_id) {
+ 
+   const bool kTimelinessRespected = srcor_ProcessReceivedMessage(connection_id);  // [3] Regular processing of the message received
+   if (!kTimelinessRespected) {
++    sbb_wrapper_diag_note_timeout_branch(connection_id, SBB_WRAPPER_TIMEOUT_RECEIVED_MESSAGE_TIMELINESS);
+     CloseConnection(connection_id, sraty_kDiscReasonTimeout, true);  // [1] Close connection
+   }
+ 

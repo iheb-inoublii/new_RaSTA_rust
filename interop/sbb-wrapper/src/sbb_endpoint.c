@@ -239,6 +239,7 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
 
     sbb_wrapper_diag_set_phase("sbb_endpoint_poll:srapi_CheckTimings");
     result = srapi_CheckTimings();
+    sbb_wrapper_diag_observe_check_timings_result(result);
     if (endpoint->trace) {
         printf("[sbb-wrapper] srapi_CheckTimings result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
     }
@@ -264,6 +265,11 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
     }
     if (result == radef_kNoError) {
         int state_value = (int)state;
+        sbb_wrapper_diag_observe_connection_snapshot(
+            state_value,
+            buffer_utilisation.send_buffer_used,
+            buffer_utilisation.receive_buffer_used,
+            opposite_buffer_size);
         if (endpoint->trace && state_value != endpoint->last_state) {
             printf(
                 "[sbb-wrapper] connection %u state transition %s -> %s send_used=%u recv_used=%u opposite_buffer=%u\n",
@@ -275,7 +281,6 @@ radef_RaStaReturnCode sbb_endpoint_poll(SbbEndpoint *endpoint)
                 (unsigned int)opposite_buffer_size);
         }
         endpoint->last_state = state_value;
-        sbb_wrapper_diag_observe_connection_state(state_value);
         if (state_value == 4) {
             endpoint->has_reached_up = 1;
         } else if ((state_value == 1 && endpoint->has_reached_up) || sbb_wrapper_diag_closed_after_up()) {
@@ -319,6 +324,23 @@ static radef_RaStaReturnCode sbb_endpoint_send_payload(
 
     sbb_wrapper_diag_set_phase(is_ping ? "sbb_endpoint_send_ping:srapi_SendData" : "sbb_endpoint_send_pong:srapi_SendData");
     result = srapi_SendData(endpoint->connection_id, (uint16_t)payload_length, payload);
+    sbb_wrapper_diag_observe_send_data_result(result);
+    if (result == radef_kNoError) {
+        sraty_ConnectionStates state = sraty_kConnectionNotInitialized;
+        sraty_BufferUtilisation buffer_utilisation = {0};
+        uint16_t opposite_buffer_size = 0U;
+        if (srapi_GetConnectionState(
+                endpoint->connection_id,
+                &state,
+                &buffer_utilisation,
+                &opposite_buffer_size) == radef_kNoError) {
+            sbb_wrapper_diag_observe_connection_snapshot(
+                (int)state,
+                buffer_utilisation.send_buffer_used,
+                buffer_utilisation.receive_buffer_used,
+                opposite_buffer_size);
+        }
+    }
     if (endpoint->trace) {
         printf(
             "[sbb-wrapper] srapi_SendData %s(%u) result=%d(%s)\n",
@@ -364,6 +386,7 @@ radef_RaStaReturnCode sbb_endpoint_read_message(SbbEndpoint *endpoint, SbbEndpoi
         (uint16_t)sizeof(payload),
         &payload_length,
         payload);
+    sbb_wrapper_diag_observe_read_data_result(result);
 
     if (endpoint->trace) {
         printf(

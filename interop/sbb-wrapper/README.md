@@ -2,9 +2,9 @@
 
 This directory contains the local SBB RaSTA wrapper used for the controlled
 native and Docker/Podman interoperability campaign. The wrapper provides POSIX
-UDP transport, a RedL/SafRetL bridge, and the Ping/Pong runtime used in the
-successful five-round Rust-to-SBB runs. It does not modify the external SBB
-checkout.
+UDP transport, a RedL/SafRetL bridge, and the Ping/Pong runtime. The current
+high-round-count interoperability investigation is not considered successful
+until the instrumented Rust-to-SBB run completes all requested rounds.
 
 The sections below retain the status that applied during each incremental build
 step. Final status and commands are recorded in the
@@ -28,14 +28,23 @@ The current skeleton:
 ## Build
 
 ```sh
-cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT=/root/sbb-investigation/sbb-rasta-stack
+SBB_ROOT="$HOME/Desktop/sbb-investigation/sbb-rasta-stack"
+git -C "$SBB_ROOT" apply --check "$PWD/interop/sbb-wrapper/sbb-timeout-instrumentation.patch"
+git -C "$SBB_ROOT" apply "$PWD/interop/sbb-wrapper/sbb-timeout-instrumentation.patch"
+cmake -S interop/sbb-wrapper -B interop/sbb-wrapper/build -G Ninja -DSBB_ROOT="$SBB_ROOT"
 cmake --build interop/sbb-wrapper/build
 ctest --test-dir interop/sbb-wrapper/build
 ```
 
 When `SBB_ROOT` points at the SBB checkout, the wrapper CMake embeds the SBB
 `rasta_common`, `rasta_redundancy`, and `rasta_safety_retransmission` modules
-and compiles the RedL/SafRetL smoke bridge.
+and compiles the RedL/SafRetL bridge. CMake requires the small instrumentation
+patch above. It adds counters immediately before all five reason-4
+`CloseConnection` calls; it does not change any decision or protocol value.
+
+During a quiet run, state, buffer use, API results, disconnect data, SafRetL
+error counters, and timeout-branch counts are retained in fixed-size globals.
+They are printed only after the application loop terminates.
 
 ## Step 8D Kali Verification
 
