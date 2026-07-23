@@ -7,13 +7,19 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 set(SBB_ROOT "" CACHE PATH "Path to an external SBB RaSTA stack checkout")
+option(SBB_WRAPPER_ALLOW_STUBS "Build without the external SBB stack (unit tests only)" OFF)
 
 if(SBB_ROOT AND EXISTS "${SBB_ROOT}/source/modules/rasta_redundancy/CMakeLists.txt")
     message(STATUS "SBB_ROOT=${SBB_ROOT}")
     set(SBB_WRAPPER_HAS_SBB_REDL TRUE)
-else()
-    message(WARNING "SBB_ROOT is not set. Building skeleton stubs only; no SBB libraries are linked.")
+elseif(SBB_WRAPPER_ALLOW_STUBS)
+    message(WARNING "Building explicitly requested skeleton stubs only; no SBB libraries are linked.")
     set(SBB_WRAPPER_HAS_SBB_REDL FALSE)
+else()
+    message(FATAL_ERROR
+        "A real SBB wrapper build requires -DSBB_ROOT=<SBB checkout>. "
+        "The checkout must contain source/modules/rasta_redundancy/CMakeLists.txt. "
+        "Use -DSBB_WRAPPER_ALLOW_STUBS=ON only for stub-only unit tests.")
 endif()
 
 if(SBB_WRAPPER_HAS_SBB_REDL)
@@ -63,11 +69,13 @@ if(SBB_WRAPPER_HAS_SBB_REDL)
     target_link_libraries(sbb_wrapper_common PUBLIC rasta_safety_retransmission rasta_redundancy rasta_common)
 endif()
 
-add_executable(sbb-rasta-wrapper
-    src/main.c
-)
+if(SBB_WRAPPER_HAS_SBB_REDL)
+    add_executable(sbb-rasta-wrapper
+        src/main.c
+    )
 
-target_link_libraries(sbb-rasta-wrapper PRIVATE sbb_wrapper_common)
+    target_link_libraries(sbb-rasta-wrapper PRIVATE sbb_wrapper_common)
+endif()
 
 enable_testing()
 
@@ -109,7 +117,8 @@ add_executable(sbb_safretl_smoke_test
 
 target_link_libraries(sbb_safretl_smoke_test PRIVATE sbb_wrapper_common)
 
-add_test(NAME sbb_safretl_smoke_test COMMAND sbb_safretl_smoke_test)
+add_test(NAME sbb_safretl_active_startup_test COMMAND sbb_safretl_smoke_test active)
+add_test(NAME sbb_safretl_passive_startup_test COMMAND sbb_safretl_smoke_test passive)
 
 add_executable(sbb_transport_notification_test
     tests/sbb_transport_notification_test.c
