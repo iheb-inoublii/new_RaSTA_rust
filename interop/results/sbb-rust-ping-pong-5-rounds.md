@@ -5,10 +5,15 @@
 | Field | Recorded value |
 |---|---|
 | Status | **PASS** |
-| Rust commit | Final main branch after README/documentation cleanup |
-| Peer | SBB RaSTA stack via local wrapper |
+| Test date | Recorded during final project validation, July 2026 |
+| Rust repository commit | `a321b7be58abe79ecfb303eaa8a1bdf7baea27c0` (`a321b7b docs: align final interop documentation`) |
+| Peer implementation | SBB RaSTA stack via local wrapper |
+| Peer revision | Not recorded; `SBB_HOST_ROOT` was not available during this documentation polish |
+| Host OS / environment | Windows development host; native interop captured in Linux/Kali and container reproduction in Docker/Podman; exact versions not fully recorded |
+| Packet capture | Not recorded |
 | Profile | `sbb-local` |
 | Evidence scope | Controlled native and Docker/Podman test configuration |
+| Evidence logs | [Final interop summary](../../docs/final-interop-summary.md) and [Docker/Podman reproduction](../../docs/docker-interop.md) |
 
 ## Network topology
 

@@ -132,13 +132,15 @@ static int open_runtime_channel(
     runtime->local_port = config->local_port;
     runtime->remote_port = config->remote_port;
 
-    printf(
-        "[sbb-wrapper] udp channel%u socket opened fd=%d local=%u remote=%s:%u\n",
-        channel_id,
-        fd,
-        config->local_port,
-        remote_ip,
-        config->remote_port);
+    if (g_trace) {
+        printf(
+            "[sbb-wrapper] udp channel%u socket opened fd=%d local=%u remote=%s:%u\n",
+            channel_id,
+            fd,
+            config->local_port,
+            remote_ip,
+            config->remote_port);
+    }
 
     return 0;
 }
@@ -164,7 +166,9 @@ int sbb_wrapper_udp_init(const SbbWrapperUdpConfig *config)
     }
 
     g_initialized = 1;
-    puts("[sbb-wrapper] udp init: real POSIX UDP sockets ready");
+    if (g_trace) {
+        puts("[sbb-wrapper] udp init: real POSIX UDP sockets ready");
+    }
     return 0;
 }
 
@@ -228,11 +232,13 @@ SbbWrapperUdpResult sbb_wrapper_udp_send(uint32_t transport_channel_id, const ui
         (const struct sockaddr *)&channel->remote_addr,
         sizeof(channel->remote_addr));
     if (sent < 0 || (size_t)sent != length) {
-        printf(
-            "[sbb-wrapper] udp send channel=%u length=%zu failed: %s\n",
-            transport_channel_id,
-            length,
-            strerror(errno));
+        if (g_trace) {
+            printf(
+                "[sbb-wrapper] udp send channel=%u length=%zu failed: %s\n",
+                transport_channel_id,
+                length,
+                strerror(errno));
+        }
         return SBB_WRAPPER_UDP_OS_ERROR;
     }
 
@@ -284,19 +290,23 @@ SbbWrapperUdpResult sbb_wrapper_udp_receive(
             return SBB_WRAPPER_UDP_NO_MESSAGE;
         }
 
-        printf(
-            "[sbb-wrapper] udp receive channel=%u failed: %s\n",
-            transport_channel_id,
-            strerror(errno));
+        if (g_trace) {
+            printf(
+                "[sbb-wrapper] udp receive channel=%u failed: %s\n",
+                transport_channel_id,
+                strerror(errno));
+        }
         return SBB_WRAPPER_UDP_OS_ERROR;
     }
 
     if ((size_t)received > capacity) {
-        printf(
-            "[sbb-wrapper] udp receive channel=%u datagram too large received=%zd capacity=%zu\n",
-            transport_channel_id,
-            received,
-            capacity);
+        if (g_trace) {
+            printf(
+                "[sbb-wrapper] udp receive channel=%u datagram too large received=%zd capacity=%zu\n",
+                transport_channel_id,
+                received,
+                capacity);
+        }
         return SBB_WRAPPER_UDP_MESSAGE_TOO_LARGE;
     }
 

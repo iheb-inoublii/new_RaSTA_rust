@@ -27,6 +27,7 @@ endif()
 
 add_library(sbb_wrapper_common OBJECT
     src/ping_pong_payload.c
+    src/ping_pong_responder.c
     src/sbb_adapter.c
     src/sbb_diagnostics.c
     src/sbb_endpoint.c
@@ -68,6 +69,14 @@ target_link_libraries(ping_pong_payload_test PRIVATE sbb_wrapper_common)
 
 add_test(NAME ping_pong_payload_test COMMAND ping_pong_payload_test)
 
+add_executable(ping_pong_responder_test
+    tests/ping_pong_responder_test.c
+)
+
+target_link_libraries(ping_pong_responder_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME ping_pong_responder_test COMMAND ping_pong_responder_test)
+
 add_executable(udp_transport_test
     tests/udp_transport_test.c
 )
@@ -99,3 +108,11 @@ add_executable(sbb_transport_notification_test
 target_link_libraries(sbb_transport_notification_test PRIVATE sbb_wrapper_common)
 
 add_test(NAME sbb_transport_notification_test COMMAND sbb_transport_notification_test)
+
+add_executable(trace_disabled_output_test
+    tests/trace_disabled_output_test.c
+)
+
+target_link_libraries(trace_disabled_output_test PRIVATE sbb_wrapper_common)
+
+add_test(NAME trace_disabled_output_test COMMAND trace_disabled_output_test)

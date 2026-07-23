@@ -140,13 +140,15 @@ radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint)
     sradin_Init();
     result = srapi_Init(endpoint->role == SBB_ENDPOINT_ROLE_ACTIVE ? &k_safretl_active_config : &k_safretl_passive_config);
     endpoint->initialized = (result == radef_kNoError);
-    printf(
-        "[sbb-wrapper] SafRetL role=%s connection_id=%u local_sender_id=0x%02x remote_receiver_id=0x%02x network_id=%u\n",
-        sbb_endpoint_role_name(endpoint),
-        (unsigned int)endpoint->connection_id,
-        (unsigned int)sbb_endpoint_local_sender_id(endpoint),
-        (unsigned int)sbb_endpoint_remote_receiver_id(endpoint),
-        (unsigned int)SBB_WRAPPER_SAFRETL_NETWORK_ID);
+    if (endpoint->trace) {
+        printf(
+            "[sbb-wrapper] SafRetL role=%s connection_id=%u local_sender_id=0x%02x remote_receiver_id=0x%02x network_id=%u\n",
+            sbb_endpoint_role_name(endpoint),
+            (unsigned int)endpoint->connection_id,
+            (unsigned int)sbb_endpoint_local_sender_id(endpoint),
+            (unsigned int)sbb_endpoint_remote_receiver_id(endpoint),
+            (unsigned int)SBB_WRAPPER_SAFRETL_NETWORK_ID);
+    }
     trace_result(endpoint, "srapi_Init", result);
     sbb_wrapper_diag_set_context(
         sbb_endpoint_role_name(endpoint),
@@ -156,7 +158,9 @@ radef_RaStaReturnCode sbb_endpoint_init(SbbEndpoint *endpoint)
     return result;
 #else
     (void)endpoint;
-    puts("[sbb-wrapper] SafRetL smoke requires SBB_ROOT; no SBB SafRetL library is linked");
+    if (endpoint->trace) {
+        puts("[sbb-wrapper] SafRetL responder requires SBB_ROOT; no SBB SafRetL library is linked");
+    }
     return radef_kNotInitialized;
 #endif
 }
@@ -172,12 +176,14 @@ radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint)
         endpoint->connection_id,
         sbb_endpoint_local_sender_id(endpoint),
         sbb_endpoint_remote_receiver_id(endpoint));
-    printf(
-        "[sbb-wrapper] SafRetL open: role=%s call_srapi_OpenConnection=true sender_id=0x%02x receiver_id=0x%02x network_id=%u\n",
-        sbb_endpoint_role_name(endpoint),
-        (unsigned int)sbb_endpoint_local_sender_id(endpoint),
-        (unsigned int)sbb_endpoint_remote_receiver_id(endpoint),
-        (unsigned int)SBB_WRAPPER_SAFRETL_NETWORK_ID);
+    if (endpoint->trace) {
+        printf(
+            "[sbb-wrapper] SafRetL open: role=%s call_srapi_OpenConnection=true sender_id=0x%02x receiver_id=0x%02x network_id=%u\n",
+            sbb_endpoint_role_name(endpoint),
+            (unsigned int)sbb_endpoint_local_sender_id(endpoint),
+            (unsigned int)sbb_endpoint_remote_receiver_id(endpoint),
+            (unsigned int)SBB_WRAPPER_SAFRETL_NETWORK_ID);
+    }
 
     result = srapi_OpenConnection(
         sbb_endpoint_local_sender_id(endpoint),
@@ -190,12 +196,14 @@ radef_RaStaReturnCode sbb_endpoint_open(SbbEndpoint *endpoint)
         endpoint->connection_id,
         sbb_endpoint_local_sender_id(endpoint),
         sbb_endpoint_remote_receiver_id(endpoint));
-    printf(
-        "[sbb-wrapper] srapi_OpenConnection: role=%s result=%d(%s) returned_connection_id=%u\n",
-        sbb_endpoint_role_name(endpoint),
-        result,
-        sbb_wrapper_rasta_return_code_name(result),
-        (unsigned int)endpoint->connection_id);
+    if (endpoint->trace) {
+        printf(
+            "[sbb-wrapper] srapi_OpenConnection: role=%s result=%d(%s) returned_connection_id=%u\n",
+            sbb_endpoint_role_name(endpoint),
+            result,
+            sbb_wrapper_rasta_return_code_name(result),
+            (unsigned int)endpoint->connection_id);
+    }
     return result;
 #else
     (void)endpoint;

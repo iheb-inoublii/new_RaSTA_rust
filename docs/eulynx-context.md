@@ -5,8 +5,10 @@ communication context around object controllers. RaSTA is relevant as a safe
 transport layer for EULYNX-style communication between signalling systems and
 object controllers.
 
-The external SBB RaSTA stack README states that SBB used that stack for a proof
-of concept of a EULYNX Object Controller. This repository's controlled SBB
+The external SBB RaSTA stack README states that the stack was used for proof of
+concept work related to a EULYNX Object Controller. This statement is based on
+the external SBB README inspected during the project; no exact external commit
+or stable source link was recorded. This repository's controlled SBB
 interoperability evidence therefore provides useful engineering context, but it
 does not establish EULYNX or SCI compliance.
 

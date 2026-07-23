@@ -217,14 +217,18 @@ void sradin_Init(void)
     radef_RaStaReturnCode result = redint_Init(&g_redl_config);
     g_redl_initialized = (result == radef_kNoError || result == radef_kAlreadyInitialized);
     clear_red_channel_state();
-    printf(
-        "[sbb-wrapper] sradin_Init: redint_Init result=%u(%s)\n",
-        (unsigned int)result,
-        sbb_wrapper_rasta_return_code_name(result));
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] sradin_Init: redint_Init result=%u(%s)\n",
+            (unsigned int)result,
+            sbb_wrapper_rasta_return_code_name(result));
+    }
 #else
     g_redl_initialized = 0;
     clear_red_channel_state();
-    puts("[sbb-wrapper] sradin_Init: SBB RedL not linked");
+    if (sbb_wrapper_udp_trace_enabled()) {
+        puts("[sbb-wrapper] sradin_Init: SBB RedL not linked");
+    }
 #endif
 }
 
@@ -237,13 +241,17 @@ void sradin_OpenRedundancyChannel(uint32_t redundancy_channel_id)
             g_red_channel_open[redundancy_channel_id] = 1;
         }
     }
-    printf(
-        "[sbb-wrapper] sradin_OpenRedundancyChannel: channel=%u result=%u(%s)\n",
-        redundancy_channel_id,
-        (unsigned int)result,
-        sbb_wrapper_rasta_return_code_name(result));
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] sradin_OpenRedundancyChannel: channel=%u result=%u(%s)\n",
+            redundancy_channel_id,
+            (unsigned int)result,
+            sbb_wrapper_rasta_return_code_name(result));
+    }
 #else
-    printf("[sbb-wrapper] sradin_OpenRedundancyChannel: channel=%u SBB RedL not linked\n", redundancy_channel_id);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf("[sbb-wrapper] sradin_OpenRedundancyChannel: channel=%u SBB RedL not linked\n", redundancy_channel_id);
+    }
 #endif
 }
 
@@ -255,20 +263,26 @@ void sradin_CloseRedundancyChannel(uint32_t redundancy_channel_id)
         g_red_channel_open[redundancy_channel_id] = 0;
         g_red_read_allowed[redundancy_channel_id] = 0u;
     }
-    printf(
-        "[sbb-wrapper] sradin_CloseRedundancyChannel: channel=%u result=%u(%s)\n",
-        redundancy_channel_id,
-        (unsigned int)result,
-        sbb_wrapper_rasta_return_code_name(result));
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] sradin_CloseRedundancyChannel: channel=%u result=%u(%s)\n",
+            redundancy_channel_id,
+            (unsigned int)result,
+            sbb_wrapper_rasta_return_code_name(result));
+    }
 #else
-    printf("[sbb-wrapper] sradin_CloseRedundancyChannel: channel=%u SBB RedL not linked\n", redundancy_channel_id);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf("[sbb-wrapper] sradin_CloseRedundancyChannel: channel=%u SBB RedL not linked\n", redundancy_channel_id);
+    }
 #endif
 }
 
 void sradin_SendMessage(uint32_t redundancy_channel_id, uint16_t message_size, const uint8_t *message_data)
 {
     if (message_data == 0 && message_size != 0u) {
-        puts("[sbb-wrapper] sradin_SendMessage: invalid null message");
+        if (sbb_wrapper_udp_trace_enabled()) {
+            puts("[sbb-wrapper] sradin_SendMessage: invalid null message");
+        }
         return;
     }
 
@@ -276,18 +290,22 @@ void sradin_SendMessage(uint32_t redundancy_channel_id, uint16_t message_size, c
     {
         sbb_wrapper_diag_set_phase("sradin_SendMessage:redint_SendMessage");
         radef_RaStaReturnCode result = redint_SendMessage(redundancy_channel_id, message_size, message_data);
-        printf(
-            "[sbb-wrapper] sradin_SendMessage: channel=%u length=%u redint_SendMessage result=%u(%s)\n",
-            redundancy_channel_id,
-            message_size,
-            (unsigned int)result,
-            sbb_wrapper_rasta_return_code_name(result));
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] sradin_SendMessage: channel=%u length=%u redint_SendMessage result=%u(%s)\n",
+                redundancy_channel_id,
+                message_size,
+                (unsigned int)result,
+                sbb_wrapper_rasta_return_code_name(result));
+        }
     }
 #else
-    printf(
-        "[sbb-wrapper] sradin_SendMessage: channel=%u length=%u SBB RedL not linked\n",
-        redundancy_channel_id,
-        message_size);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] sradin_SendMessage: channel=%u length=%u SBB RedL not linked\n",
+            redundancy_channel_id,
+            message_size);
+    }
 #endif
 }
 
@@ -304,9 +322,11 @@ radef_RaStaReturnCode sradin_ReadMessage(
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     {
         if (!valid_red_channel(redundancy_channel_id)) {
-            printf(
-                "[sbb-wrapper] sradin_ReadMessage: channel=%u skipped because redundancy channel is invalid\n",
-                redundancy_channel_id);
+            if (sbb_wrapper_udp_trace_enabled()) {
+                printf(
+                    "[sbb-wrapper] sradin_ReadMessage: channel=%u skipped because redundancy channel is invalid\n",
+                    redundancy_channel_id);
+            }
             return radef_kNoMessageReceived;
         }
         if (!g_red_channel_open[redundancy_channel_id]) {
@@ -368,20 +388,24 @@ radef_RaStaReturnCode sradin_ReadMessage(
                 g_red_read_allowed[redundancy_channel_id]);
         }
         radef_RaStaReturnCode read_result = redint_ReadMessage(redundancy_channel_id, buffer_size, message_size, message_buffer);
-        printf(
-            "[sbb-wrapper] sradin_ReadMessage: channel=%u timing_result=%u(%s) read_result=%u(%s) length=%u\n",
-            redundancy_channel_id,
-            (unsigned int)timing_result,
-            sbb_wrapper_rasta_return_code_name(timing_result),
-            (unsigned int)read_result,
-            sbb_wrapper_rasta_return_code_name(read_result),
-            message_size == 0 ? 0u : *message_size);
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] sradin_ReadMessage: channel=%u timing_result=%u(%s) read_result=%u(%s) length=%u\n",
+                redundancy_channel_id,
+                (unsigned int)timing_result,
+                sbb_wrapper_rasta_return_code_name(timing_result),
+                (unsigned int)read_result,
+                sbb_wrapper_rasta_return_code_name(read_result),
+                message_size == 0 ? 0u : *message_size);
+        }
         return read_result;
     }
 #else
-    printf(
-        "[sbb-wrapper] sradin_ReadMessage: channel=%u SBB RedL not linked\n",
-        redundancy_channel_id);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] sradin_ReadMessage: channel=%u SBB RedL not linked\n",
+            redundancy_channel_id);
+    }
     return radef_kNoMessageReceived;
 #endif
 }
@@ -389,14 +413,18 @@ radef_RaStaReturnCode sradin_ReadMessage(
 void redtri_Init(void)
 {
     if (!sbb_wrapper_udp_is_initialized()) {
-        puts("[sbb-wrapper] redtri_Init: UDP transport is not initialized");
+        if (sbb_wrapper_udp_trace_enabled()) {
+            puts("[sbb-wrapper] redtri_Init: UDP transport is not initialized");
+        }
         return;
     }
 
     clear_pending_slots();
     clear_red_channel_state();
     g_redl_initialized = 0;
-    puts("[sbb-wrapper] redtri_Init: UDP transport ready");
+    if (sbb_wrapper_udp_trace_enabled()) {
+        puts("[sbb-wrapper] redtri_Init: UDP transport ready");
+    }
 }
 
 void redtri_SendMessage(uint32_t transport_channel_id, uint16_t message_size, const uint8_t *message_data)
@@ -404,25 +432,31 @@ void redtri_SendMessage(uint32_t transport_channel_id, uint16_t message_size, co
     SbbWrapperUdpResult result;
 
     if (message_data == 0 && message_size != 0u) {
-        puts("[sbb-wrapper] redtri_SendMessage: invalid null message");
+        if (sbb_wrapper_udp_trace_enabled()) {
+            puts("[sbb-wrapper] redtri_SendMessage: invalid null message");
+        }
         return;
     }
 
     sbb_wrapper_diag_set_phase("redtri_SendMessage:udp_send");
     result = sbb_wrapper_udp_send(transport_channel_id, message_data, message_size);
     if (result == SBB_WRAPPER_UDP_OK) {
-        printf(
-            "[sbb-wrapper] redtri_SendMessage: transport=%u length=%u sent\n",
-            transport_channel_id,
-            message_size);
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] redtri_SendMessage: transport=%u length=%u sent\n",
+                transport_channel_id,
+                message_size);
+        }
         return;
     }
 
-    printf(
-        "[sbb-wrapper] redtri_SendMessage: transport=%u length=%u failed udp_result=%d\n",
-        transport_channel_id,
-        message_size,
-        result);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] redtri_SendMessage: transport=%u length=%u failed udp_result=%d\n",
+            transport_channel_id,
+            message_size,
+            result);
+    }
 }
 
 radef_RaStaReturnCode redtri_ReadMessage(
@@ -438,21 +472,27 @@ radef_RaStaReturnCode redtri_ReadMessage(
     }
 
     if (slot == 0 || message_size == 0 || message_buffer == 0) {
-        printf("[sbb-wrapper] redtri_ReadMessage: transport=%u invalid parameter\n", transport_channel_id);
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf("[sbb-wrapper] redtri_ReadMessage: transport=%u invalid parameter\n", transport_channel_id);
+        }
         return radef_kInvalidParameter;
     }
 
     if (!slot->occupied) {
-        printf("[sbb-wrapper] redtri_ReadMessage: transport=%u no message\n", transport_channel_id);
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf("[sbb-wrapper] redtri_ReadMessage: transport=%u no message\n", transport_channel_id);
+        }
         return radef_kNoMessageReceived;
     }
 
     if (slot->length > buffer_size) {
-        printf(
-            "[sbb-wrapper] redtri_ReadMessage: transport=%u pending length=%u exceeds buffer=%u\n",
-            transport_channel_id,
-            slot->length,
-            buffer_size);
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] redtri_ReadMessage: transport=%u pending length=%u exceeds buffer=%u\n",
+                transport_channel_id,
+                slot->length,
+                buffer_size);
+        }
         slot->occupied = 0;
         slot->length = 0u;
         return radef_kInvalidBufferSize;
@@ -464,10 +504,12 @@ radef_RaStaReturnCode redtri_ReadMessage(
     slot->occupied = 0;
     slot->length = 0u;
 
-    printf(
-        "[sbb-wrapper] redtri_ReadMessage: transport=%u length=%u consumed pending datagram\n",
-        transport_channel_id,
-        *message_size);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] redtri_ReadMessage: transport=%u length=%u consumed pending datagram\n",
+            transport_channel_id,
+            *message_size);
+    }
     return radef_kNoError;
 }
 
@@ -509,10 +551,12 @@ int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id)
         return 0;
     }
     if (result != SBB_WRAPPER_UDP_OK) {
-        printf(
-            "[sbb-wrapper] transport poll: channel=%u udp_result=%d\n",
-            transport_channel_id,
-            result);
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] transport poll: channel=%u udp_result=%d\n",
+                transport_channel_id,
+                result);
+        }
         return -1;
     }
 
@@ -520,36 +564,48 @@ int sbb_wrapper_transport_poll_channel(uint32_t transport_channel_id)
     slot->length = (uint16_t)received_length;
     log_received_red_frame(transport_channel_id, slot->bytes, slot->length);
     note_received_sr_type(decode_sr_type(slot->bytes, slot->length));
-    printf(
-        "[sbb-wrapper] transport poll: channel=%u received length=%u pending\n",
-        transport_channel_id,
-        slot->length);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] transport poll: channel=%u received length=%u pending\n",
+            transport_channel_id,
+            slot->length);
+    }
 
 #ifdef SBB_WRAPPER_HAS_SBB_REDL
     if (!g_redl_initialized) {
-        printf(
-            "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u deferred because RedL is not initialized\n",
-            transport_channel_id);
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u deferred because RedL is not initialized\n",
+                transport_channel_id);
+        }
         return 1;
     }
     if (sbb_wrapper_diag_closed_after_up()) {
-        printf(
-            "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u skipped because connection closed after Up\n",
-            transport_channel_id);
+        if (sbb_wrapper_udp_trace_enabled()) {
+            printf(
+                "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u skipped because connection closed after Up\n",
+                transport_channel_id);
+        }
         return 1;
     }
     sbb_wrapper_diag_set_phase("transport_poll:redtrn_MessageReceivedNotification");
     redtrn_MessageReceivedNotification(transport_channel_id);
     if (g_disconnect_frame_in_progress && sbb_wrapper_diag_closed_after_up()) {
-        puts("[sbb-wrapper] RedL notification stopped safely because DiscReq closed the connection");
+        if (sbb_wrapper_udp_trace_enabled()) {
+            puts("[sbb-wrapper] RedL notification stopped safely because DiscReq closed the connection");
+        }
     }
-    printf(
-        "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u invoked\n",
-        transport_channel_id);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u invoked\n",
+            transport_channel_id);
+    }
 #else
-    printf(
-        "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u SBB RedL not linked\n",
-        transport_channel_id);
+    if (sbb_wrapper_udp_trace_enabled()) {
+        printf(
+            "[sbb-wrapper] redtrn_MessageReceivedNotification: transport=%u SBB RedL not linked\n",
+            transport_channel_id);
+    }
 #endif
 
     return 1;

@@ -2,6 +2,7 @@
 
 #include "sbb_diagnostics.h"
 #include "sbb_endpoint.h"
+#include "ping_pong_responder.h"
 #include "udp_transport.h"
 
 #include <limits.h>
@@ -144,17 +145,26 @@ static int parse_settings(int argc, char **argv, WrapperSettings *settings)
         }
     }
 
+    if (settings->rounds == 0u) {
+        return -1;
+    }
+
     return 0;
 }
 
 static void print_settings(const WrapperSettings *settings)
 {
-    printf("[sbb-wrapper] role=%s\n", settings->role == WRAPPER_ROLE_ACTIVE ? "active" : "passive");
-    printf("[sbb-wrapper] rounds=%u\n", settings->rounds);
-    printf("[sbb-wrapper] run_seconds=%u\n", settings->run_seconds);
-    printf("[sbb-wrapper] trace=%s\n", settings->trace ? "true" : "false");
-    printf("[sbb-wrapper] debug_no_abort=%s\n", settings->debug_no_abort ? "true" : "false");
-    sbb_wrapper_udp_print_config(&settings->udp);
+    printf(
+        "[sbb-wrapper] startup: role=%s requested_rounds=%u run_seconds=%u trace=%s remote=%s channel0=%u->%u channel1=%u->%u\n",
+        settings->role == WRAPPER_ROLE_ACTIVE ? "active" : "passive",
+        settings->rounds,
+        settings->run_seconds,
+        settings->trace ? "true" : "false",
+        settings->remote_ip,
+        settings->udp.channel0.local_port,
+        settings->udp.channel0.remote_port,
+        settings->udp.channel1.local_port,
+        settings->udp.channel1.remote_port);
 }
 
 static uint32_t monotonic_millis(void)
@@ -180,11 +190,9 @@ int main(int argc, char **argv)
     uint32_t end_time;
     unsigned int next_ping = 1u;
     unsigned int expected_pong = 1u;
-    unsigned int expected_ping = 1u;
     unsigned int sent_pings = 0u;
     unsigned int received_pongs = 0u;
-    unsigned int received_pings = 0u;
-    unsigned int sent_pongs = 0u;
+    SbbWrapperResponderState responder;
     int application_success = 0;
 
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
@@ -197,9 +205,9 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    puts("[sbb-wrapper] Step 8I SBB-to-SBB Ping/Pong runtime smoke only; no Rust-to-SBB interop is claimed");
     print_settings(&settings);
     sbb_wrapper_diag_set_debug_no_abort(settings.debug_no_abort);
+    sbb_wrapper_responder_init(&responder, settings.rounds);
 
     sbb_wrapper_diag_set_phase("main:udp_init");
     if (sbb_wrapper_udp_init(&settings.udp) != 0) {
@@ -234,19 +242,25 @@ int main(int argc, char **argv)
         sbb_wrapper_diag_set_phase("main:poll");
         result = sbb_endpoint_poll(&endpoint);
         if (result != radef_kNoError) {
-            printf("[sbb-wrapper] SafRetL poll returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+            if (settings.trace) {
+                printf("[sbb-wrapper] SafRetL poll returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
+            }
             break;
         }
         if (sbb_wrapper_diag_has_fatal()) {
             result = sbb_wrapper_diag_fatal_reason();
-            printf(
-                "[sbb-wrapper] recorded fatal after poll result=%d(%s); exiting diagnostic run\n",
-                result,
-                sbb_wrapper_rasta_return_code_name(result));
+            if (settings.trace) {
+                printf(
+                    "[sbb-wrapper] recorded fatal after poll result=%d(%s); exiting diagnostic run\n",
+                    result,
+                    sbb_wrapper_rasta_return_code_name(result));
+            }
             break;
         }
         if (sbb_endpoint_is_closed_after_up(&endpoint)) {
-            puts("[sbb-wrapper] connection closed after Up; graceful SBB-to-SBB smoke complete");
+            if (settings.trace) {
+                puts("[sbb-wrapper] peer or protocol closed connection after Up before requested rounds completed");
+            }
             break;
         }
         sbb_wrapper_diag_set_phase("main:read");
@@ -257,46 +271,49 @@ int main(int argc, char **argv)
                 if (message.counter == expected_pong) {
                     received_pongs += 1u;
                     expected_pong += 1u;
-                } else {
+                } else if (settings.trace) {
                     printf(
                         "[sbb-wrapper] unexpected Pong order: expected=%u received=%u\n",
                         expected_pong,
                         (unsigned int)message.counter);
                 }
             } else if (result == radef_kNoError && message.kind == SBB_ENDPOINT_APP_PING && settings.role == WRAPPER_ROLE_PASSIVE) {
-                if (message.counter == expected_ping) {
-                    received_pings += 1u;
-                    expected_ping += 1u;
-                } else {
+                uint32_t expected_counter = responder.expected_counter;
+                uint32_t pong_counter = sbb_wrapper_responder_accept_ping(&responder, message.counter);
+                if (message.counter != expected_counter && settings.trace) {
                     printf(
                         "[sbb-wrapper] unexpected Ping order: expected=%u received=%u\n",
-                        expected_ping,
+                        expected_counter,
                         (unsigned int)message.counter);
                 }
                 sbb_wrapper_diag_set_phase("main:send_pong");
-                result = sbb_endpoint_send_pong(&endpoint, message.counter);
+                result = sbb_endpoint_send_pong(&endpoint, pong_counter);
                 if (result == radef_kNoError) {
-                    sent_pongs += 1u;
+                    sbb_wrapper_responder_note_pong_sent(&responder);
                     if (settings.trace) {
-                        printf("[sbb-wrapper] sent Pong(%u)\n", (unsigned int)message.counter);
+                        printf("[sbb-wrapper] sent Pong(%u)\n", (unsigned int)pong_counter);
                     }
-                } else {
+                } else if (settings.trace) {
                     printf(
                         "[sbb-wrapper] Pong(%u) not sent result=%d(%s)\n",
                         (unsigned int)message.counter,
                         result,
                         sbb_wrapper_rasta_return_code_name(result));
                 }
-            } else if (result != radef_kNoError && result != radef_kNoMessageReceived) {
+            } else if (result == radef_kNoError && settings.role == WRAPPER_ROLE_PASSIVE) {
+                sbb_wrapper_responder_note_malformed(&responder);
+            } else if (result != radef_kNoError && result != radef_kNoMessageReceived && settings.trace) {
                 printf("[sbb-wrapper] SafRetL read returned result=%d(%s)\n", result, sbb_wrapper_rasta_return_code_name(result));
             }
         }
         if (sbb_wrapper_diag_has_fatal()) {
             result = sbb_wrapper_diag_fatal_reason();
-            printf(
-                "[sbb-wrapper] recorded fatal after read result=%d(%s); exiting diagnostic run\n",
-                result,
-                sbb_wrapper_rasta_return_code_name(result));
+            if (settings.trace) {
+                printf(
+                    "[sbb-wrapper] recorded fatal after read result=%d(%s); exiting diagnostic run\n",
+                    result,
+                    sbb_wrapper_rasta_return_code_name(result));
+            }
             break;
         }
 
@@ -304,7 +321,9 @@ int main(int argc, char **argv)
             sbb_wrapper_diag_set_phase("main:send_ping");
             result = sbb_endpoint_send_ping(&endpoint, next_ping);
             if (result == radef_kNoError) {
-                printf("[sbb-wrapper] sent Ping(%u)\n", next_ping);
+                if (settings.trace) {
+                    printf("[sbb-wrapper] sent Ping(%u)\n", next_ping);
+                }
                 sent_pings += 1u;
                 next_ping += 1u;
             } else if (settings.trace) {
@@ -318,18 +337,17 @@ int main(int argc, char **argv)
 
         if (settings.role == WRAPPER_ROLE_ACTIVE && sent_pings == settings.rounds && received_pongs == settings.rounds) {
             application_success = 1;
-            puts("[sbb-wrapper] active Ping/Pong success condition reached");
             break;
         }
-        if (settings.role == WRAPPER_ROLE_PASSIVE && received_pings == settings.rounds && sent_pongs == settings.rounds) {
-            application_success = 1;
-            sbb_wrapper_diag_mark_smoke_complete();
-            puts("[sbb-wrapper] passive Ping/Pong success condition reached");
-            puts("[sbb-wrapper] stopping SafRetL/RedL polling after replying to all Pings");
+        if (settings.role == WRAPPER_ROLE_PASSIVE && sbb_wrapper_responder_is_complete(&responder)) {
+            application_success = sbb_wrapper_responder_succeeded(&responder);
+            sbb_wrapper_diag_mark_application_complete();
             break;
         }
 
-        sleep_millis(10L);
+        if (!sbb_endpoint_is_up(&endpoint)) {
+            sleep_millis(10L);
+        }
     }
 
     if (settings.role == WRAPPER_ROLE_ACTIVE) {
@@ -340,15 +358,19 @@ int main(int argc, char **argv)
             application_success ? "true" : "false");
     } else {
         printf(
-            "[sbb-wrapper] passive summary: received_pings=%u sent_pongs=%u success=%s\n",
-            received_pings,
-            sent_pongs,
+            "[sbb-wrapper] passive summary: requested_rounds=%u received_pings=%u sent_pongs=%u malformed_or_mismatched=%u success=%s\n",
+            responder.requested_rounds,
+            responder.received_pings,
+            responder.sent_pongs,
+            responder.malformed_or_mismatched,
             application_success ? "true" : "false");
     }
 
     sbb_wrapper_diag_set_phase("main:close");
-    if (sbb_wrapper_diag_smoke_complete()) {
-        puts("[sbb-wrapper] SafRetL close skipped because smoke already complete");
+    if (sbb_wrapper_diag_application_complete()) {
+        if (settings.trace) {
+            puts("[sbb-wrapper] SafRetL close skipped after configured application rounds completed");
+        }
     } else {
         result = sbb_endpoint_close(&endpoint);
         if (result != radef_kNoError && settings.trace) {
@@ -356,7 +378,6 @@ int main(int argc, char **argv)
         }
     }
 
-    puts("[sbb-wrapper] exiting after SBB-to-SBB Ping/Pong runtime smoke");
     sbb_wrapper_udp_close();
     return application_success ? 0 : 1;
 }

@@ -10,7 +10,7 @@ static int g_has_fatal = 0;
 static int g_has_reached_up = 0;
 static int g_closed_after_up = 0;
 static uint32_t g_heartbeat_count = 0u;
-static int g_smoke_complete = 0;
+static int g_application_complete = 0;
 static radef_RaStaReturnCode g_fatal_reason = radef_kNoError;
 
 void sbb_wrapper_diag_set_context(const char *role, uint32_t connection_id, uint32_t sender_id, uint32_t receiver_id)
@@ -83,14 +83,14 @@ uint32_t sbb_wrapper_diag_heartbeat_count(void)
     return g_heartbeat_count;
 }
 
-void sbb_wrapper_diag_mark_smoke_complete(void)
+void sbb_wrapper_diag_mark_application_complete(void)
 {
-    g_smoke_complete = 1;
+    g_application_complete = 1;
 }
 
-int sbb_wrapper_diag_smoke_complete(void)
+int sbb_wrapper_diag_application_complete(void)
 {
-    return g_smoke_complete;
+    return g_application_complete;
 }
 
 const char *sbb_wrapper_diag_role(void)

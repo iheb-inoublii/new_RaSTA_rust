@@ -1,0 +1,67 @@
+﻿diff --git a/docs/eulynx-context.md b/docs/eulynx-context.md
+index 2c65155..ee13d91 100644
+--- a/docs/eulynx-context.md
++++ b/docs/eulynx-context.md
+@@ -5,8 +5,10 @@ communication context around object controllers. RaSTA is relevant as a safe
+ transport layer for EULYNX-style communication between signalling systems and
+ object controllers.
+ 
+-The external SBB RaSTA stack README states that SBB used that stack for a proof
+-of concept of a EULYNX Object Controller. This repository's controlled SBB
++The external SBB RaSTA stack README states that the stack was used for proof of
++concept work related to a EULYNX Object Controller. This statement is based on
++the external SBB README inspected during the project; no exact external commit
++or stable source link was recorded. This repository's controlled SBB
+ interoperability evidence therefore provides useful engineering context, but it
+ does not establish EULYNX or SCI compliance.
+ 
+diff --git a/docs/final-interop-summary.md b/docs/final-interop-summary.md
+index b86d180..b2b9879 100644
+--- a/docs/final-interop-summary.md
++++ b/docs/final-interop-summary.md
+@@ -7,9 +7,20 @@ Related evidence and context:
+ - [EULYNX context](eulynx-context.md)
+ - [Docker/Podman reproduction](docker-interop.md)
+ 
+-Branch: `refactor/test-profile-foundation`
+-
+-Protected branch: `interop/librasta-wire-compat`
++## Authoritative revision
++
++- Final authoritative branch: `main`.
++- Final documented main commit:
++  `a321b7be58abe79ecfb303eaa8a1bdf7baea27c0`
++  (`a321b7b docs: align final interop documentation`).
++- Historical development branch: `refactor/test-profile-foundation`, merged
++  into `main`.
++- Earlier protected known-good interoperability work:
++  `interop/librasta-wire-compat`.
++
++The historical branch names identify the development lineage only. They are not
++competing final branches; `main` at the commit above is the authoritative
++documented revision.
+ 
+ ## Profiles
+ 
+diff --git a/interop/results/sbb-rust-ping-pong-5-rounds.md b/interop/results/sbb-rust-ping-pong-5-rounds.md
+index 49bfcb0..67f7f82 100644
+--- a/interop/results/sbb-rust-ping-pong-5-rounds.md
++++ b/interop/results/sbb-rust-ping-pong-5-rounds.md
+@@ -5,10 +5,15 @@
+ | Field | Recorded value |
+ |---|---|
+ | Status | **PASS** |
+-| Rust commit | Final main branch after README/documentation cleanup |
+-| Peer | SBB RaSTA stack via local wrapper |
++| Test date | Recorded during final project validation, July 2026 |
++| Rust repository commit | `a321b7be58abe79ecfb303eaa8a1bdf7baea27c0` (`a321b7b docs: align final interop documentation`) |
++| Peer implementation | SBB RaSTA stack via local wrapper |
++| Peer revision | Not recorded; `SBB_HOST_ROOT` was not available during this documentation polish |
++| Host OS / environment | Windows development host; native interop captured in Linux/Kali and container reproduction in Docker/Podman; exact versions not fully recorded |
++| Packet capture | Not recorded |
+ | Profile | `sbb-local` |
+ | Evidence scope | Controlled native and Docker/Podman test configuration |
++| Evidence logs | [Final interop summary](../../docs/final-interop-summary.md) and [Docker/Podman reproduction](../../docs/docker-interop.md) |
+ 
+ ## Network topology
+ 

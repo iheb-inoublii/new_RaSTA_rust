@@ -7,9 +7,20 @@ Related evidence and context:
 - [EULYNX context](eulynx-context.md)
 - [Docker/Podman reproduction](docker-interop.md)
 
-Branch: `refactor/test-profile-foundation`
+## Authoritative revision
 
-Protected branch: `interop/librasta-wire-compat`
+- Final authoritative branch: `main`.
+- Final documented main commit:
+  `a321b7be58abe79ecfb303eaa8a1bdf7baea27c0`
+  (`a321b7b docs: align final interop documentation`).
+- Historical development branch: `refactor/test-profile-foundation`, merged
+  into `main`.
+- Earlier protected known-good interoperability work:
+  `interop/librasta-wire-compat`.
+
+The historical branch names identify the development lineage only. They are not
+competing final branches; `main` at the commit above is the authoritative
+documented revision.
 
 ## Profiles
 
